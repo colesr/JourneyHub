@@ -497,6 +497,7 @@
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
     import { getFirestore, collection, addDoc, getDocs, getDoc, doc, updateDoc, query, orderBy, where, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+    import { getFunctions, httpsCallable } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-functions.js';
 
     // Firebase configuration - YOU NEED TO REPLACE THIS WITH YOUR OWN CONFIG
     const firebaseConfig = {
@@ -513,6 +514,7 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
     const auth = getAuth(app);
+    const functions = getFunctions(app);
 
     // State Management
     let currentUser = null;
@@ -656,6 +658,10 @@
               </div>
             </div>
             ${thread.content ? `<div class="thread-body">${escapeHtml(thread.content)}</div>` : ''}
+            ${currentUser ? `
+              <button onclick="window.summarizeThread('${thread.id}')" id="summarizeBtn" style="margin-top:10px;font-size:12px;padding:6px 12px;">Summarize with AI</button>
+              <div id="summaryResult" style="margin-top:10px;padding:12px;background:#f0f7f3;border-radius:3px;font-size:13px;display:none;border-left:3px solid var(--green);"></div>
+            ` : ''}
           </div>
           
           ${currentUser ? `
@@ -666,6 +672,7 @@
                   <textarea id="commentText" placeholder="What are your thoughts?" required></textarea>
                 </div>
                 <button type="submit">Post Comment</button>
+                <button type="button" class="secondary-btn" onclick="window.improveComment()" id="improveBtn">Improve with AI</button>
               </form>
             </div>
           ` : '<div class="message info">Please <a href="#" onclick="window.showLogin(); return false;">login</a> to comment.</div>'}
@@ -687,9 +694,9 @@
           snapshot.forEach((doc) => {
             comments.push({ id: doc.id, ...doc.data() });
           });
-          
+
           document.getElementById('commentCount').textContent = `${comments.length} Comments`;
-          
+
           let commentsHtml = '';
           for (const comment of comments) {
             const commentLiked = currentUser && comment.likedBy && comment.likedBy.includes(currentUser.uid);
@@ -708,8 +715,11 @@
               </div>
             `;
           }
-          
+
           document.getElementById('commentsList').innerHTML = commentsHtml || '<div class="message info">No comments yet. Be the first to comment!</div>';
+        }, (error) => {
+          console.error('Error loading comments:', error);
+          document.getElementById('commentsList').innerHTML = '<div class="message error">Error loading comments. Please try again later.</div>';
         });
       } catch (error) {
         console.error('Error loading thread:', error);
@@ -992,6 +1002,79 @@
       }, 3000);
     }
 
+    // AI Functions
+    async function summarizeThread(threadId) {
+      const btn = document.getElementById('summarizeBtn');
+      const resultDiv = document.getElementById('summaryResult');
+
+      btn.disabled = true;
+      btn.textContent = 'Summarizing...';
+      resultDiv.style.display = 'none';
+
+      try {
+        const threadDoc = await getDoc(doc(db, 'threads', threadId));
+        const thread = threadDoc.data();
+
+        const commentsSnapshot = await getDocs(query(collection(db, 'comments'), where('threadId', '==', threadId), orderBy('timestamp', 'asc')));
+        const comments = [];
+        commentsSnapshot.forEach((doc) => {
+          const data = doc.data();
+          comments.push({ author: data.author, content: data.content });
+        });
+
+        const summarize = httpsCallable(functions, 'summarizeThread');
+        const result = await summarize({
+          title: thread.title,
+          content: thread.content,
+          comments: comments
+        });
+
+        resultDiv.innerHTML = '<strong>AI Summary:</strong> ' + escapeHtml(result.data.summary);
+        resultDiv.style.display = 'block';
+      } catch (error) {
+        console.error('Error summarizing:', error);
+        showMessage('Error generating summary', 'error');
+      }
+
+      btn.disabled = false;
+      btn.textContent = 'Summarize with AI';
+    }
+
+    async function improveComment() {
+      const textarea = document.getElementById('commentText');
+      const btn = document.getElementById('improveBtn');
+      const draft = textarea.value.trim();
+
+      if (!draft) {
+        showMessage('Write a comment first, then click Improve', 'error');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Improving...';
+
+      try {
+        const threadDoc = await getDoc(doc(db, 'threads', currentThreadId));
+        const thread = threadDoc.data();
+
+        const improve = httpsCallable(functions, 'improveComment');
+        const result = await improve({
+          draft: draft,
+          threadTitle: thread.title,
+          threadContent: thread.content
+        });
+
+        textarea.value = result.data.improved;
+        showMessage('Comment improved! Review it before posting.', 'success');
+      } catch (error) {
+        console.error('Error improving comment:', error);
+        showMessage('Error improving comment', 'error');
+      }
+
+      btn.disabled = false;
+      btn.textContent = 'Improve with AI';
+    }
+
     // Export functions to window for onclick handlers
     window.showHome = showHome;
     window.showThread = showThread;
@@ -1004,6 +1087,8 @@
     window.submitThread = submitThread;
     window.submitComment = submitComment;
     window.toggleLike = toggleLike;
+    window.summarizeThread = summarizeThread;
+    window.improveComment = improveComment;
 
     // Initialize on load
     init();
