@@ -15,3 +15,11 @@ database_id = "719420fd-73f8-4f64-afbd-86b9468a95be"
 [[r2_buckets]]
 binding = "IMAGES"
 bucket_name = "journeyhub-images"
+
+[[durable_objects.bindings]]
+name = "CONVROOMS"
+class_name = "ConversationRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ConversationRoom"]

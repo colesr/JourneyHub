@@ -1,6 +1,9 @@
 import { Hono } from 'hono';
 import { setCookie, getCookie, deleteCookie } from 'hono/cookie';
 import { handleDb } from './documents.js';
+import { ConversationRoom } from './conversation_room.js';
+
+export { ConversationRoom };
 
 const app = new Hono();
 
@@ -147,6 +150,28 @@ app.post('/api/auth/logout', async (c) => {
 });
 
 app.post('/api/db', handleDb);
+
+app.get('/api/ws/:convId', async (c) => {
+  if (c.req.header('upgrade') !== 'websocket') {
+    return c.json({ error: 'Expected WebSocket' }, 426);
+  }
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  const convId = c.req.param('convId');
+  const row = await c.env.DB.prepare('SELECT data FROM documents WHERE path = ?')
+    .bind('conversations/' + convId).first();
+  if (!row) return c.json({ error: 'Conversation not found' }, 404);
+  const conv = JSON.parse(row.data);
+  const participants = Array.isArray(conv.participants) ? conv.participants : [];
+  if (!participants.includes(user.user_id)) {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const id = c.env.CONVROOMS.idFromName(convId);
+  const stub = c.env.CONVROOMS.get(id);
+  return stub.fetch(c.req.raw);
+});
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 

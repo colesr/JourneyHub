@@ -131,7 +131,21 @@ async function opGetDocs(DB, { collection, constraints = [] }) {
   return { status: 200, body: { docs } };
 }
 
-async function opSetDoc(DB, { path, data, merge }) {
+const MESSAGE_COLL_RE = /^conversations\/([^/]+)\/messages$/;
+
+async function maybeBroadcast(env, collection, payload) {
+  const m = collection.match(MESSAGE_COLL_RE);
+  if (!m || !env?.CONVROOMS) return;
+  try {
+    const id = env.CONVROOMS.idFromName(m[1]);
+    const stub = env.CONVROOMS.get(id);
+    await stub.broadcast({ type: 'message', convId: m[1], ...payload });
+  } catch (e) {
+    console.error('DO broadcast failed', e);
+  }
+}
+
+async function opSetDoc(DB, { path, data, merge }, env) {
   if (!path || data === undefined) return { status: 400, body: { error: 'Missing path or data' } };
   const p = splitPath(path);
   if (!p) return { status: 400, body: { error: 'Invalid path' } };
@@ -156,6 +170,7 @@ async function opSetDoc(DB, { path, data, merge }) {
        ON CONFLICT(path) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
     ).bind(path, p.collection, p.doc_id, JSON.stringify(data), createdAt, now).run();
   }
+  await maybeBroadcast(env, p.collection, { msgId: p.doc_id });
   return { status: 200, body: { ok: true } };
 }
 
@@ -169,7 +184,7 @@ async function opUpdateDoc(DB, { path, data }) {
   return { status: 200, body: { ok: true } };
 }
 
-async function opAddDoc(DB, { collection, data }) {
+async function opAddDoc(DB, { collection, data }, env) {
   if (!collection || data === undefined) return { status: 400, body: { error: 'Missing collection or data' } };
   const segs = collection.split('/').filter(Boolean);
   if (segs.length % 2 !== 1) return { status: 400, body: { error: 'Invalid collection path' } };
@@ -180,6 +195,7 @@ async function opAddDoc(DB, { collection, data }) {
     `INSERT INTO documents (path, collection, doc_id, data, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?)`,
   ).bind(path, collection, id, JSON.stringify(data), now, now).run();
+  await maybeBroadcast(env, collection, { msgId: id });
   return { status: 200, body: { id, path } };
 }
 
@@ -201,9 +217,9 @@ export async function handleDb(c) {
   switch (body.op) {
     case 'getDoc': result = await opGetDoc(DB, body); break;
     case 'getDocs': result = await opGetDocs(DB, body); break;
-    case 'setDoc': result = await opSetDoc(DB, body); break;
+    case 'setDoc': result = await opSetDoc(DB, body, c.env); break;
     case 'updateDoc': result = await opUpdateDoc(DB, body); break;
-    case 'addDoc': result = await opAddDoc(DB, body); break;
+    case 'addDoc': result = await opAddDoc(DB, body, c.env); break;
     case 'deleteDoc': result = await opDeleteDoc(DB, body); break;
     default: return c.json({ error: `Unknown op: ${body.op}` }, 400);
   }

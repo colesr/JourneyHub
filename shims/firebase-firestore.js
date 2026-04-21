@@ -311,6 +311,8 @@ function emit(collPath, kind, ref, data) {
   }
 }
 
+const MESSAGES_COLL_RE = /^conversations\/([^/]+)\/messages$/;
+
 export function onSnapshot(refOrQuery, cb, errCb) {
   let coll;
   let isDoc = false;
@@ -343,11 +345,43 @@ export function onSnapshot(refOrQuery, cb, errCb) {
     collectionListeners.get(coll.path).add(fire);
   }
 
+  // Cross-client realtime: open a WS when listening on a messages collection.
+  // On any notification, refetch so cb sees the full, ordered current state.
+  let ws = null;
+  let wsPingTimer = null;
+  if (!isDoc && coll) {
+    const m = coll.path.match(MESSAGES_COLL_RE);
+    if (m) {
+      try {
+        const convId = m[1];
+        const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        ws = new WebSocket(`${scheme}//${location.host}/api/ws/${convId}`);
+        ws.addEventListener('message', () => fire());
+        ws.addEventListener('open', () => {
+          wsPingTimer = setInterval(() => {
+            try { ws.send('ping'); } catch {}
+          }, 30_000);
+        });
+        ws.addEventListener('close', () => {
+          if (wsPingTimer) { clearInterval(wsPingTimer); wsPingTimer = null; }
+        });
+        ws.addEventListener('error', (e) => console.warn('messages ws error', e));
+      } catch (e) {
+        console.warn('messages ws setup failed', e);
+      }
+    }
+  }
+
   fire();
 
   return () => {
     if (isDoc) docListeners.get(docPath)?.delete(fire);
     else collectionListeners.get(coll.path)?.delete(fire);
+    if (wsPingTimer) { clearInterval(wsPingTimer); wsPingTimer = null; }
+    if (ws) {
+      try { ws.close(); } catch {}
+      ws = null;
+    }
   };
 }
 

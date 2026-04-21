@@ -39,7 +39,12 @@
       "Bash(curl -s -b /tmp/jh-cookies.txt -H 'Content-Type: application/json' -d '{\"op\":\"addDoc\",\"collection\":\"threads\",\"data\":{\"title\":\"world\",\"authorId\":\"u1\",\"timestamp\":{\"__t\":\"ts\",\"m\":2000}}}' https://journeyhub.cole-colesr-sam.workers.dev/api/db)",
       "Bash(git reset *)",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(gh auth *)",
+      "Bash(git remote *)",
+      "Bash(git push *)",
+      "Bash(curl -s -c /tmp/jh-cookies.txt -H 'Content-Type: application/json' -d '{\"email\":\"alice@journeyhub.dev\",\"password\":\"testpass123\",\"username\":\"alice\"}' https://journeyhub.cole-colesr-sam.workers.dev/api/auth/register)",
+      "Bash(curl --http1.1 -si -b /tmp/jh-cookies.txt -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' --max-time 3 https://journeyhub.cole-colesr-sam.workers.dev/api/ws/testconv)"
     ]
   }
 }
