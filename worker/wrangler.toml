@@ -1,0 +1,17 @@
+name = "journeyhub"
+main = "src/index.js"
+compatibility_date = "2026-04-01"
+
+[assets]
+directory = "../"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "journeyhub"
+database_id = "719420fd-73f8-4f64-afbd-86b9468a95be"
+
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "journeyhub-images"

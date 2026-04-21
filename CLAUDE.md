@@ -4,90 +4,89 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**JourneyHub** — an AI-guided growth network for builders and founders. A single-page app built with vanilla JavaScript and Firebase services (no build step, bundler, or framework). The entire frontend lives in `index.html` (~12,000 lines of inline CSS + JS). Gemini-powered AI features run in Firebase Cloud Functions.
+**JourneyHub** — an AI-guided growth network for builders and founders. A single-page app with a vanilla-JS frontend (`index.html`, ~12,000 lines) and a Cloudflare Workers backend (`worker/`). No build step, no framework.
+
+Live at: **https://journeyhub.cole-colesr-sam.workers.dev**
+
+Runs entirely on Cloudflare's permanent free tier:
+- **Workers** — API + static asset serving (100k req/day, no sleep, no pause)
+- **D1** — SQLite database (5GB, forever free)
+- **R2** — image storage (10GB, **zero egress fees**)
+- **Gemini API** — called directly from the browser via `shims/gemini.js` with a user-provided key in `localStorage`
 
 ## Architecture
 
-- **`index.html`** — The entire frontend: styles (CSS custom properties in `:root`), HTML shell, and all application JS in a single `<script type="module">` block. Uses Firebase JS SDK loaded from CDN (`gstatic.com/firebasejs/10.7.1/`). All view functions render by setting `innerHTML` on `#app`. ~140+ handlers are exposed globally via `window.*` assignments at the bottom of the file (~line 11230+).
-- **`functions/index.js`** — Firebase Cloud Functions (Node.js, ~3,000 lines, ~48 exports). Callable functions for Gemini-powered AI features (summarize, improve comment, mood analysis, community DNA, mentorship matching, draft suggestions, etc.) plus Firestore triggers for bot replies, notifications, and badge updates. `GEMINI_API_KEY` is stored as a Firebase secret via `defineSecret`.
-- **`firestore.rules`** — Security rules for all Firestore collections (see list below).
-- **`storage.rules`** — Firebase Storage rules (image uploads, 5MB limit).
-- **`firestore.indexes.json`** — Composite indexes for Firestore queries.
-- **`firebase.json`** — Firebase config: hosting serves from `.` with SPA rewrite, plus Firestore and Storage rule references.
+- **`index.html`** — Entire frontend: styles (CSS custom properties in `:root`), HTML shell, and all application JS in a single `<script type="module">` block. Imports from `./shims/firebase-*.js` (not the Firebase CDN) — the shims expose the Firebase v9 modular API but route calls to the Cloudflare Worker. ~140+ handlers are exposed globally via `window.*` at the bottom of the file (~line 11230+).
+- **`worker/`** — Cloudflare Worker (Hono + D1 + R2).
+  - `worker/src/index.js` — routes: `/api/auth/*` (register, login, logout, me), `POST /api/db` (document store), `POST /api/upload` + `GET /r2/*` (image CRUD), static asset fallback via the `ASSETS` binding.
+  - `worker/src/documents.js` — generic JSON document store backed by a single `documents` table. Firestore-like ops: `getDoc`, `getDocs`, `setDoc`, `updateDoc`, `addDoc`, `deleteDoc`. Constraint evaluation (where/orderBy/limit) runs in-memory on the Worker.
+  - `worker/schema.sql` — D1 schema: `users`, `sessions`, `documents` tables.
+  - `worker/wrangler.toml` — bindings: D1 (`DB`), R2 (`IMAGES`), static assets (`ASSETS`).
+- **`shims/`** — Frontend shims preserving the Firebase v9 modular API surface so `index.html` never has to change.
+  - `firebase-auth.js` — calls `/api/auth/*`, session via `httpOnly` cookie.
+  - `firebase-firestore.js` — calls `/api/db`; sentinels (`serverTimestamp`, `arrayUnion`, `increment`, etc.) resolved client-side via read-modify-write.
+  - `firebase-storage.js` — uploads via `POST /api/upload`, URLs are relative `/r2/<path>`.
+  - `firebase-app.js`, `firebase-functions.js` — minimal noop/pass-through shims.
+  - `cloud-functions.js` — browser-side implementations of the ~48 Firebase Callable Functions using Gemini directly.
+  - `gemini.js`, `api-key-modal.js` — Gemini client + modal prompting the user for their API key.
+- **`.assetsignore`** — lists files at the repo root the Worker should NOT serve as static assets (e.g. `worker/`, `functions/`, `CLAUDE.md`, `*.rules`).
 
-### Alternate Railway deployment
+### Legacy paths (not deployed, kept for reference)
 
-The app can also be deployed as a static site to Railway (not just Firebase Hosting):
+- **`functions/`** — Firebase Cloud Functions (Node.js, ~48 callables using Gemini). Was the backend for the Firebase-hosted version; replaced by `worker/`. Gemini now runs client-side via `shims/gemini.js`.
+- **`firestore.rules`**, **`firestore.indexes.json`**, **`storage.rules`**, **`firebase.json`**, **`.firebaserc`** — Firebase config from the previous deploy.
+- **`server.js`**, **`railway.json`** — Railway static-hosting entry (served `index.html` + `shims/` via Express).
 
-- **`server.js`** + **`package.json`** (root) — tiny Express static server for Railway.
-- **`railway.json`** — Railway build/deploy config (Nixpacks).
-- **`shims/`** — drop-in replacements for Firebase/Cloud Function calls when running without Firebase. `gemini.js` calls the Gemini API directly from the browser; `api-key-modal.js` prompts the user for a Gemini key stored in `localStorage`.
+## Database Model
 
-## Firestore Collections
+**Auth tables (typed):**
+- `users(id, email, username, password_hash, password_salt, display_name, bio, avatar_url, created_at, updated_at)`
+- `sessions(token, user_id, expires_at, created_at)` — 30-day TTL
 
-Core content:
-- `users` — profiles with username, bio, interests, expertise, followers/following, badges
-- `threads` — forum posts (title, content, author, communityId, tags, likedBy, imageUrl)
-- `comments` — tied to threads via `threadId`, with `likedBy`
-- `communities` — user-created groups (name, description, members)
-- `conversations` / `messages` subcollection — direct messaging (participants array gates access); bot conversations use fixed IDs for `__journeyhub_platform_guide__` and `__journeyhub_spark_bot__`
-- `events` — community events with RSVP via attendees
-- `notifications` — per-user with read status
-- `reports` — content reports (write-only from client)
+**Document store (generic):**
+- `documents(path, collection, doc_id, data JSON, created_at, updated_at)` — one row per Firestore-style path (e.g. `threads/abc` or `conversations/xyz/messages/m1`). Indexed by `collection` and `(collection, updated_at DESC)`.
 
-Growth & social:
-- `growthPaths` + `members`, `updates` subcollections — milestone-based goals with accountability
-- `journeyResponses` — responses to profile life-journey prompts
-- `feedPosts` — following-feed posts
-- `investments` — "invest in person" mechanic
-- `shoutouts` — peer recognition
-- `trustVouches` — endorsements
-- `mentorships` — mentorship connections
-- `missions` + `comments` subcollection — structured challenges
-- `thoughtLab` — shared ideas
-- `coThinkSessions` — collaborative thinking sessions
+Everything the app historically wrote to Firestore (`threads`, `comments`, `communities`, `conversations`/`messages`, `events`, `notifications`, `growthPaths`, `journeyResponses`, `feedPosts`, `investments`, etc.) now lives in `documents`. Type-safety is enforced by the frontend, not the schema.
 
-AI/analytics caches:
-- `communityInsights`, `memberProfiles`, `topicAnalysis`, `keystoneMembers` (+ `members` subcollection) — AI analysis outputs
-- `digests` — generated weekly digests
-- `cache` — generic response cache
+## Auth
 
-Infrastructure:
-- `analyticsEvents`, `rateLimits`, `invites`, `tags`, `tagSubscriptions` (+ `tags` subcollection), `shareProfiles`, `userBadges` (+ `badges` subcollection)
+- PBKDF2 (Web Crypto), SHA-256, 100k iterations, per-user 16-byte salt.
+- Session: 32-byte random URL-safe token in D1 `sessions` table, mirrored in an `httpOnly` + `Secure` + `SameSite=Lax` cookie (`session`), 30-day TTL.
+- `/api/auth/register` creates a user + session in one request; `/api/auth/login` creates a new session; `/api/auth/logout` deletes the current session.
+- Hono middleware on `*` hydrates `c.get('user')` from the cookie on every request.
+
+## Real-time
+
+- **Same-client** — writes through the Firestore shim fire client-side listeners immediately via an in-memory event bus (same pattern as the prior localStorage shim).
+- **Cross-client** — not yet implemented. Planned via **Durable Objects + WebSockets** for DMs (Phase 4); other realtime (comments, notifications) may follow.
 
 ## Common Commands
 
 ```bash
-# Deploy everything to Firebase (hosting, rules, indexes, functions)
-firebase deploy
+# Deploy the Worker (hosts API + static assets)
+cd worker && npx wrangler deploy
 
-# Deploy only hosting
-firebase deploy --only hosting
+# Apply a schema change to D1
+cd worker && npx wrangler d1 execute journeyhub --remote --file=./schema.sql
 
-# Deploy only Firestore rules
-firebase deploy --only firestore:rules
+# Inspect D1 (ad-hoc query)
+cd worker && npx wrangler d1 execute journeyhub --remote --command="SELECT COUNT(*) FROM documents;"
 
-# Deploy only Cloud Functions
-firebase deploy --only functions
+# Local dev (local SQLite simulation)
+cd worker && npx wrangler dev
 
-# Run Firebase emulators locally
-firebase emulators:start
+# Tail production logs
+cd worker && npx wrangler tail
 
-# View deployed site
-firebase open hosting:site
-
-# Railway deploy (alternate path — static only, uses shims for AI)
-# Pushed via Railway's Git integration; runs `npm start` → server.js
+# Re-auth if wrangler token is missing scopes (e.g. r2)
+wrangler login
 ```
-
-The Cloud Functions in `functions/index.js` require `npm install` in the `functions/` directory before deploying (Firebase CLI handles this during `firebase deploy --only functions`).
 
 ## Key Patterns
 
-- **No routing library** — navigation is handled by `show*()` functions (e.g., `showHome()`, `showThread(id)`, `showProfile(uid)`, `showGrowthPaths()`, `showMessages()`) that replace `#app` innerHTML.
-- **Real-time updates** — `onSnapshot` listeners for threads, comments, messages, notifications, co-think sessions. Active listeners are tracked on module-level `*Listener` variables and detached on view changes.
-- **Auth flow** — Firebase Auth (email/password + Google). `onAuthStateChanged` in `init()` drives state. Username is derived from email prefix.
-- **All handlers exposed on `window`** — event handlers referenced in inline HTML `onclick=` attributes must be assigned to `window.*` at the bottom of the script block.
-- **Image uploads** — Firebase Storage via `uploadImage()`, returning a download URL stored on the Firestore doc.
-- **AI bot conversations** — the JourneyHub Guide and Spark Bot have fixed user IDs; messages sent in their conversations trigger `onDocumentCreated` Cloud Functions (`replyToPlatformGuideMessage`, `replyToSparkBotMessage`) that call Gemini and write the reply back to the same conversation.
-- **Shim compatibility** — when adding new Cloud Function calls, consider whether `shims/cloud-functions.js` needs a browser-side equivalent for the Railway build.
+- **No routing library** — navigation is handled by `show*()` functions that replace `#app` innerHTML.
+- **Shim swap, not app rewrite** — the backend changed from Firebase → Cloudflare, but `index.html` is untouched because the shims preserve the Firebase v9 API. Any future backend change should follow the same pattern.
+- **All handlers on `window`** — event handlers referenced in inline `onclick=` attributes are assigned at the bottom of the script block.
+- **Image URLs are relative** (`/r2/<path>`) so they work across any origin the app is hosted on.
+- **Auth state is async on load** — `onAuthStateChanged` callbacks may fire with `null` once before the `/api/auth/me` hydration completes, then again with the real user. App code should handle both.
+- **Adding a new Worker endpoint** — route in `worker/src/index.js`; read session via `c.get('user')`; deploy with `wrangler deploy`; update any shim if the frontend needs a new client method.
