@@ -3553,6 +3553,7 @@
     let currentView = 'home';
     let currentThreadId = null;
     let editingCommentId = null;
+    let replyingToCommentId = null;
     let editingJourneyResponseId = null;
     const PLATFORM_GUIDE_USER_ID = '__journeyhub_platform_guide__';
     const PLATFORM_GUIDE_NAME = 'JourneyHub Guide';
@@ -4727,13 +4728,31 @@
 
           document.getElementById('commentCount').textContent = `${comments.length} Comments`;
 
-          let commentsHtml = '';
-          for (const comment of comments) {
+          const repliesByParent = new Map();
+          const topLevel = [];
+          for (const c of comments) {
+            if (c.parentCommentId) {
+              if (!repliesByParent.has(c.parentCommentId)) repliesByParent.set(c.parentCommentId, []);
+              repliesByParent.get(c.parentCommentId).push(c);
+            } else {
+              topLevel.push(c);
+            }
+          }
+
+          const MAX_INDENT_DEPTH = 5;
+
+          function renderComment(comment, depth) {
             const commentLiked = currentUser && comment.likedBy && comment.likedBy.includes(currentUser.uid);
             const isCommentOwner = isCurrentUserOwner(comment.authorId);
             const isEditing = isCommentOwner && editingCommentId === comment.id;
-            commentsHtml += `
-              <div class="comment">
+            const isReplying = currentUser && replyingToCommentId === comment.id;
+            const visualDepth = Math.min(depth, MAX_INDENT_DEPTH);
+            const indentStyle = depth > 0
+              ? `margin-left:${visualDepth * 20}px;border-left:2px solid var(--border);padding-left:12px;`
+              : '';
+
+            let html = `
+              <div class="comment" style="${indentStyle}">
                 <div class="comment-header">
                   <span class="comment-author" onclick="window.showProfile('${comment.authorId}')">${escapeHtml(comment.author)}</span>
                   <span class="comment-time">${formatTime(comment.timestamp)}${comment.updatedAt ? ' | edited' : ''}</span>
@@ -4761,6 +4780,7 @@
                   ${renderReactions('comment', comment.id, comment.reactions)}
                   <div class="comment-actions">
                     <a onclick="window.toggleLike('comment', '${comment.id}')" class="${commentLiked ? 'liked' : ''}">&#9650; ${comment.likes || 0}</a>
+                    ${currentUser ? `<a onclick="window.startCommentReply('${comment.id}')">reply</a>` : ''}
                     <a onclick="window.analyzeInteraction('comment', '${comment.id}')">tone</a>
                     ${isCommentOwner ? `<a onclick="window.startCommentEdit('${comment.id}')">edit</a>` : ''}
                     ${currentUser ? `<a onclick="window.reportContent('comment', '${comment.id}')">flag</a>` : ''}
@@ -4768,10 +4788,34 @@
                   </div>
                   <div id="analysis-comment-${comment.id}"></div>
                 `}
+                ${isReplying ? `
+                  <form onsubmit="window.submitComment(event, '${comment.id}'); return false;" style="margin-top:12px;">
+                    <div class="form-group">
+                      <textarea id="replyText-${comment.id}" placeholder="Write a reply..." required></textarea>
+                    </div>
+                    <div class="form-group">
+                      <div class="image-upload">
+                        <label for="replyImage-${comment.id}">Attach image...</label>
+                        <input type="file" id="replyImage-${comment.id}" accept="image/jpeg,image/png,image/gif,image/webp" onchange="window.handleImageSelect('replyImage-${comment.id}', 'replyImagePreview-${comment.id}')">
+                      </div>
+                      <div class="image-preview" id="replyImagePreview-${comment.id}"></div>
+                    </div>
+                    <button type="submit" class="small-btn">Post Reply</button>
+                    <button type="button" class="small-btn secondary-btn" onclick="window.cancelCommentReply()">Cancel</button>
+                  </form>
+                ` : ''}
               </div>
             `;
+
+            const children = repliesByParent.get(comment.id) || [];
+            for (const child of children) {
+              html += renderComment(child, depth + 1);
+            }
+            return html;
           }
 
+          let commentsHtml = '';
+          for (const c of topLevel) commentsHtml += renderComment(c, 0);
           document.getElementById('commentsList').innerHTML = commentsHtml || '<div class="message info">No comments yet. Be the first to comment!</div>';
         }, (error) => {
           console.error('Error loading comments:', error);
@@ -5261,10 +5305,17 @@
       }
     }
 
-    async function submitComment(event) {
+    async function submitComment(event, parentCommentId = null) {
       event.preventDefault();
-      const content = document.getElementById('commentText').value;
-      const imageInput = document.getElementById('commentImage');
+      const isReply = !!parentCommentId;
+      const textId = isReply ? `replyText-${parentCommentId}` : 'commentText';
+      const imageInputId = isReply ? `replyImage-${parentCommentId}` : 'commentImage';
+      const previewId = isReply ? `replyImagePreview-${parentCommentId}` : 'commentImagePreview';
+      const defaultBtnLabel = isReply ? 'Post Reply' : 'Post Comment';
+
+      const textEl = document.getElementById(textId);
+      const imageInput = document.getElementById(imageInputId);
+      const content = textEl.value;
       const btn = event.target.querySelector('button[type="submit"]');
 
       btn.disabled = true;
@@ -5272,7 +5323,7 @@
 
       try {
         let imageUrl = null;
-        if (imageInput.files[0]) {
+        if (imageInput && imageInput.files[0]) {
           btn.textContent = 'Uploading image...';
           imageUrl = await uploadImage(imageInput.files[0], 'comments');
         }
@@ -5286,48 +5337,72 @@
           likes: 0,
           likedBy: []
         };
+        if (parentCommentId) commentData.parentCommentId = parentCommentId;
         if (imageUrl) commentData.imageUrl = imageUrl;
 
         await addDoc(collection(db, 'comments'), commentData);
-        await trackJourneyEvent('comment_created', { threadId: currentThreadId });
+        await trackJourneyEvent('comment_created', { threadId: currentThreadId, parentCommentId: parentCommentId || null });
 
         const mentionedUsers = await resolveMentionedUsers(content);
         await Promise.all(mentionedUsers
           .filter((user) => user.id !== currentUser.uid)
           .map((user) => addNotification(user.id, 'mention', `${currentUser.email.split('@')[0]} mentioned you in a comment`, currentThreadId)));
 
-        // Notify thread author
-        const threadDoc = await getDoc(doc(db, 'threads', currentThreadId));
-        if (threadDoc.exists() && threadDoc.data().authorId !== currentUser.uid) {
-          await addNotification(threadDoc.data().authorId, 'comment', `${currentUser.email.split('@')[0]} commented on your thread "${threadDoc.data().title}"`, currentThreadId);
+        // Notify the relevant author: parent comment author for a reply, thread author for a top-level comment.
+        if (parentCommentId) {
+          const parentSnap = await getDoc(doc(db, 'comments', parentCommentId));
+          if (parentSnap.exists() && parentSnap.data().authorId !== currentUser.uid) {
+            await addNotification(parentSnap.data().authorId, 'reply', `${currentUser.email.split('@')[0]} replied to your comment`, currentThreadId);
+          }
+        } else {
+          const threadDoc = await getDoc(doc(db, 'threads', currentThreadId));
+          if (threadDoc.exists() && threadDoc.data().authorId !== currentUser.uid) {
+            await addNotification(threadDoc.data().authorId, 'comment', `${currentUser.email.split('@')[0]} commented on your thread "${threadDoc.data().title}"`, currentThreadId);
+          }
         }
 
         await recalcBadges(currentUser.uid);
 
-        document.getElementById('commentText').value = '';
-        document.getElementById('commentImagePreview').innerHTML = '';
-        imageInput.value = '';
-        showMessage('Comment posted!', 'success');
+        if (textEl) textEl.value = '';
+        if (imageInput) imageInput.value = '';
+        const previewEl = document.getElementById(previewId);
+        if (previewEl) previewEl.innerHTML = '';
+        showMessage(isReply ? 'Reply posted!' : 'Comment posted!', 'success');
+        if (isReply) replyingToCommentId = null;
         await updateStreak();
         await incrementChallengeProgress('comment');
         await checkMilestoneBadges(currentUser.uid);
         btn.disabled = false;
-        btn.textContent = 'Post Comment';
+        btn.textContent = defaultBtnLabel;
+        if (isReply) showThread(currentThreadId);
       } catch (error) {
         console.error('Error posting comment:', error);
-        showMessage('Error posting comment', 'error');
+        showMessage(isReply ? 'Error posting reply' : 'Error posting comment', 'error');
         btn.disabled = false;
-        btn.textContent = 'Post Comment';
+        btn.textContent = defaultBtnLabel;
       }
     }
 
     function startCommentEdit(commentId) {
       editingCommentId = commentId;
+      replyingToCommentId = null;
       showThread(currentThreadId);
     }
 
     function cancelCommentEdit() {
       editingCommentId = null;
+      showThread(currentThreadId);
+    }
+
+    function startCommentReply(commentId) {
+      if (!currentUser) { showLogin(); return; }
+      replyingToCommentId = commentId;
+      editingCommentId = null;
+      showThread(currentThreadId);
+    }
+
+    function cancelCommentReply() {
+      replyingToCommentId = null;
       showThread(currentThreadId);
     }
 
@@ -11236,6 +11311,8 @@
     window.submitComment = submitComment;
     window.startCommentEdit = startCommentEdit;
     window.cancelCommentEdit = cancelCommentEdit;
+    window.startCommentReply = startCommentReply;
+    window.cancelCommentReply = cancelCommentReply;
     window.saveCommentEdit = saveCommentEdit;
     window.deleteComment = deleteComment;
     window.saveThreadEdit = saveThreadEdit;
