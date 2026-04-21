@@ -1,0 +1,363 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uidField) {
+      return isSignedIn() && request.auth.uid == resource.data[uidField];
+    }
+
+    // Users – anyone can read profiles; only the owner can create/update their own
+    match /users/{userId} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isSignedIn() && request.auth.uid == userId;
+      allow delete: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Threads – anyone can read; authenticated users can create; author can edit/delete;
+    // anyone authenticated can only change likes on existing docs
+    match /threads/{threadId} {
+      allow read: if true;
+      allow create: if isSignedIn() &&
+        request.resource.data.authorId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        (
+          isOwner("authorId") &&
+          request.resource.data.authorId == resource.data.authorId &&
+          request.resource.data.author == resource.data.author &&
+          request.resource.data.timestamp == resource.data.timestamp &&
+          request.resource.data.likes == resource.data.likes &&
+          request.resource.data.likedBy == resource.data.likedBy &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["title", "content", "communityId", "communityName", "imageUrl", "tags", "updatedAt"])
+        ) ||
+        request.resource.data.authorId == resource.data.authorId &&
+        request.resource.data.author == resource.data.author &&
+        request.resource.data.timestamp == resource.data.timestamp &&
+        request.resource.data.title == resource.data.title &&
+        request.resource.data.content == resource.data.content &&
+        request.resource.data.communityId == resource.data.communityId &&
+        request.resource.data.communityName == resource.data.communityName &&
+        request.resource.data.imageUrl == resource.data.imageUrl &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["likes", "likedBy"])
+      );
+      allow delete: if isOwner("authorId");
+    }
+
+    // Comments – anyone can read; authenticated users can create; author can edit/delete;
+    // anyone authenticated can only change likes on existing docs
+    match /comments/{commentId} {
+      allow read: if true;
+      allow create: if isSignedIn() &&
+        request.resource.data.authorId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        (
+          isOwner("authorId") &&
+          request.resource.data.authorId == resource.data.authorId &&
+          request.resource.data.author == resource.data.author &&
+          request.resource.data.threadId == resource.data.threadId &&
+          request.resource.data.timestamp == resource.data.timestamp &&
+          request.resource.data.likes == resource.data.likes &&
+          request.resource.data.likedBy == resource.data.likedBy &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["content", "imageUrl", "updatedAt"])
+        ) ||
+        request.resource.data.authorId == resource.data.authorId &&
+        request.resource.data.author == resource.data.author &&
+        request.resource.data.threadId == resource.data.threadId &&
+        request.resource.data.timestamp == resource.data.timestamp &&
+        request.resource.data.content == resource.data.content &&
+        request.resource.data.imageUrl == resource.data.imageUrl &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["likes", "likedBy"])
+      );
+      allow delete: if isOwner("authorId");
+    }
+
+    // Communities – anyone can read; authenticated users can create;
+    // creator can edit/delete; authenticated users can only change membership
+    match /communities/{communityId} {
+      allow read: if true;
+      allow create: if isSignedIn() &&
+        request.resource.data.creatorId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        (
+          isOwner("creatorId") &&
+          request.resource.data.creatorId == resource.data.creatorId &&
+          request.resource.data.creatorName == resource.data.creatorName &&
+          request.resource.data.members == resource.data.members &&
+          request.resource.data.createdAt == resource.data.createdAt &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["name", "description", "rules", "updatedAt"])
+        ) ||
+        request.resource.data.creatorId == resource.data.creatorId &&
+        request.resource.data.creatorName == resource.data.creatorName &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.name == resource.data.name &&
+        request.resource.data.description == resource.data.description &&
+        request.resource.data.rules == resource.data.rules &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["members"])
+      );
+      allow delete: if isOwner("creatorId");
+    }
+
+    // Feed posts – authenticated users can create; author can edit/delete
+    match /feedPosts/{postId} {
+      allow read: if true;
+      allow create: if isSignedIn() &&
+        request.resource.data.authorId == request.auth.uid;
+      allow update: if isSignedIn() &&
+        isOwner("authorId") &&
+        request.resource.data.authorId == resource.data.authorId &&
+        request.resource.data.author == resource.data.author &&
+        request.resource.data.timestamp == resource.data.timestamp &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["content", "updatedAt"]);
+      allow delete: if isOwner("authorId");
+    }
+
+    // Journey responses – anyone can read; authenticated users can respond; author can edit/delete
+    match /journeyResponses/{responseId} {
+      allow read: if true;
+      allow create: if isSignedIn() &&
+        request.resource.data.authorId == request.auth.uid;
+      allow update: if isSignedIn() &&
+        isOwner("authorId") &&
+        request.resource.data.authorId == resource.data.authorId &&
+        request.resource.data.author == resource.data.author &&
+        request.resource.data.profileOwnerId == resource.data.profileOwnerId &&
+        request.resource.data.timestamp == resource.data.timestamp &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["content", "updatedAt"]);
+      allow delete: if isOwner("authorId");
+    }
+
+    // Conversations – only participants can read/write
+    match /conversations/{convId} {
+      allow read: if request.auth != null && request.auth.uid in resource.data.participants;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && request.auth.uid in resource.data.participants;
+
+      // Messages subcollection
+      match /messages/{msgId} {
+        allow read: if request.auth != null && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participants;
+        allow create: if request.auth != null && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participants;
+      }
+    }
+
+    // Events – anyone can read; authenticated users can create/update (RSVP)
+    match /events/{eventId} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null;
+    }
+
+    // Notifications – only the recipient can read/update; any authenticated user can create
+    match /notifications/{notifId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow delete: if request.auth != null && request.auth.uid == resource.data.userId;
+    }
+
+    // Reports – created by Cloud Functions; admins can read/update
+    match /reports/{reportId} {
+      allow create: if false;
+      allow read: if isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+      allow update: if isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+
+    // Analytics events – written by Cloud Functions only
+    match /analyticsEvents/{eventId} {
+      allow read: if false;
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Rate-limit state – written by Cloud Functions only
+    match /rateLimits/{docId} {
+      allow read: if false;
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Growth Paths – anyone can read public paths; authenticated users can create/update
+    match /growthPaths/{pathId} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null;
+
+      // Members subcollection
+      match /members/{memberId} {
+        allow read: if true;
+        allow create: if request.auth != null;
+        allow update: if request.auth != null;
+        allow delete: if request.auth != null && request.auth.uid == memberId;
+      }
+
+      // Updates subcollection
+      match /updates/{updateId} {
+        allow read: if true;
+        allow create: if request.auth != null;
+      }
+    }
+
+    // Investments (Bet On People) – anyone can read; created/updated by Cloud Functions
+    match /investments/{investmentId} {
+      allow read: if true;
+      allow create: if false;
+      allow update: if false;
+    }
+
+    // Shoutouts – anyone can read; authenticated users can create
+    match /shoutouts/{shoutoutId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+    }
+
+    // Invites – user can read their own; authenticated users can create
+    match /invites/{inviteId} {
+      allow read: if isSignedIn() && request.auth.uid == resource.data.fromUserId;
+      allow create: if isSignedIn();
+    }
+
+    // Thought Lab – only owner can read/write their own ideas
+    match /thoughtLab/{ideaId} {
+      allow read: if isSignedIn() && request.auth.uid == resource.data.userId;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && request.auth.uid == resource.data.userId;
+      allow delete: if isSignedIn() && request.auth.uid == resource.data.userId;
+    }
+
+    // Missions (Mentor Quests) – anyone can read; authenticated create/update
+    match /missions/{missionId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+
+      match /comments/{commentId} {
+        allow read: if true;
+        allow create: if isSignedIn();
+      }
+    }
+
+    // Co-Think Sessions – anyone can read; authenticated create/update
+    match /coThinkSessions/{sessionId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+    }
+
+    // Cache – readable by authenticated users; written only by Cloud Functions
+    match /cache/{docId} {
+      allow read: if isSignedIn();
+    }
+
+    // Trust Vouches – anyone can read; authenticated users can create/update/delete their own
+    match /trustVouches/{vouchId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && request.auth.uid == resource.data.fromUserId;
+      allow delete: if isSignedIn() && request.auth.uid == resource.data.fromUserId;
+    }
+
+    // Community Insights – consensus maps, temporal arcs, cross-domain insights (read-only from client)
+    match /communityInsights/{communityId} {
+      allow read: if true;
+      allow create: if false;
+      allow update: if false;
+    }
+
+    // Member Profiles Enhanced – thought evolution, expertise areas, keystone metrics
+    match /memberProfiles/{userId} {
+      allow read: if true;
+      allow create: if false;
+      allow update: if false;
+    }
+
+    // Topic Analysis – consensus/contradiction maps for specific topics
+    match /topicAnalysis/{topicId} {
+      allow read: if true;
+      allow create: if false;
+      allow update: if false;
+    }
+
+    // Keystone Members – connectors and synthesizers ranked
+    match /keystoneMembers/{communityId} {
+      allow read: if true;
+      allow create: if false;
+      allow update: if false;
+
+      match /members/{userId} {
+        allow read: if true;
+        allow create: if false;
+        allow update: if false;
+      }
+    }
+
+    // User Badges – anyone can read; system writes only
+    match /userBadges/{userId} {
+      allow read: if true;
+      allow create: if false;
+      allow update: if false;
+
+      match /badges/{badgeId} {
+        allow read: if true;
+        allow create: if false;
+        allow update: if false;
+      }
+    }
+
+    // Tags – anyone can read; authenticated users can follow/unfollow
+    match /tags/{tagId} {
+      allow read: if true;
+      allow create: if false;
+      allow update: if false;
+    }
+
+    // User tag subscriptions – users manage their own; read-only from client
+    match /tagSubscriptions/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow create: if false;
+      allow update: if false;
+
+      match /tags/{tagId} {
+        allow read: if isSignedIn() && resource.parent().parent().id == request.auth.uid;
+        allow write: if isSignedIn() && resource.parent().parent().id == request.auth.uid;
+      }
+    }
+
+    // Public profile shares – anyone can read; system creates/deletes
+    match /shareProfiles/{shareToken} {
+      allow read: if true;
+      allow create: if false;
+      allow delete: if false;
+    }
+
+    // Mentorships – participants can read/update
+    match /mentorships/{connectionId} {
+      allow read: if isSignedIn() && (
+        request.auth.uid == resource.data.menteeId ||
+        request.auth.uid == resource.data.mentorId
+      );
+      allow create: if false;
+      allow update: if isSignedIn() && (
+        request.auth.uid == resource.data.menteeId ||
+        request.auth.uid == resource.data.mentorId
+      );
+    }
+
+    // Weekly digests – users can read their own
+    match /digests/{digestId} {
+      allow read: if isSignedIn() && request.auth.uid == resource.data.userId;
+      allow create: if false;
+    }
+  }
+}
