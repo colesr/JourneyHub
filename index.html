@@ -3539,17 +3539,7 @@
     import { openApiKeyModal as __openGeminiKeyModal } from './shims/api-key-modal.js';
     window.openGeminiKeyModal = __openGeminiKeyModal;
 
-    const firebaseConfig = {
-      apiKey: "AIzaSyCZSmJQkufGrtgcVZk0d6QpA6kiIm3jWF0",
-      authDomain: "my-forum-9876f.firebaseapp.com",
-      projectId: "my-forum-9876f",
-      storageBucket: "my-forum-9876f.firebasestorage.app",
-      messagingSenderId: "181109690022",
-      appId: "1:181109690022:web:a5093166beb719fb46ae67",
-      measurementId: "G-452Y9P00WE"
-    };
-
-    const app = initializeApp(firebaseConfig);
+    const app = initializeApp();
     const db = getFirestore(app);
     const auth = getAuth(app);
     const functions = getFunctions(app);
