@@ -42,18 +42,20 @@ const RSS_FEEDS = [
   { url: 'https://www.cbc.ca/cmlink/rss-world',                  name: 'CBC' },
 ];
 
-// Minimal growth resource catalog so searchGrowthResources can return something
-// stable. The original cloud function shipped a 21-resource catalog; this is a
-// representative sample. The browser-side rankLocalResources() in index.html
-// uses its own catalog separately.
+// Growth resource catalog that searchGrowthResources shows the AI. IDs here
+// must match the RESOURCE_LIBRARY in index.html so that buttons on the result
+// cards resolve to real in-app actions (not dead links). Keep these in sync
+// when adding/renaming resources.
 const GROWTH_RESOURCE_CATALOG = [
-  { id: 'ai_coach_clarity', title: 'Clarity Coach',         category: 'ai_coach',     description: 'AI conversation that helps you name vague feelings and pick a single next action.', tags: ['clarity','focus','overwhelm'], actionLabel: 'Open AI coach', route: 'resources' },
-  { id: 'ai_coach_career',  title: 'Career Coach',          category: 'ai_coach',     description: 'Targeted reflection prompts about work, role design, and growth bets.',           tags: ['career','work','growth'],     actionLabel: 'Open AI coach', route: 'resources' },
-  { id: 'self_audit_values',title: 'Values Audit',          category: 'self_disc',    description: 'A 12-question audit that surfaces your top 5 working values.',                    tags: ['values','identity'],          actionLabel: 'Start audit',  route: 'resources' },
-  { id: 'community_makers', title: 'Makers Community',      category: 'community',    description: 'A community of independent builders shipping projects week by week.',             tags: ['community','builders'],       actionLabel: 'Join',         route: 'communities' },
-  { id: 'course_systems',   title: 'Personal Systems Course',category: 'course',      description: 'A short course on building habit stacks and weekly review rituals.',              tags: ['habits','systems'],           actionLabel: 'Open course',  route: 'resources' },
-  { id: 'book_deepwork',    title: 'Deep Work',             category: 'book',         description: 'Cal Newport on focused work and crafting attention.',                             tags: ['focus','deep work'],          actionLabel: 'Open',         route: 'resources' },
-  { id: 'podcast_huberman', title: 'Tools for the mind',    category: 'podcast',      description: 'Science-backed conversations about productivity, sleep, and motivation.',         tags: ['health','focus'],             actionLabel: 'Listen',       route: 'resources' },
+  { id: 'journeyhub-guide',   title: 'JourneyHub Guide DM',  category: 'AI Coach',        description: 'Ask the built-in AI guide about navigation, tools, and where to start.',        tags: ['onboarding','navigation','questions','ai help'],   actionLabel: 'Open Messages',      route: 'messages' },
+  { id: 'profile-reflection', title: 'Profile Reflection',   category: 'Self-Discovery',  description: 'Sharpen your profile so others can quickly understand your goals and strengths.', tags: ['clarity','identity','goals','reflection'],        actionLabel: 'Open Profile',       route: 'profile' },
+  { id: 'life-journey',       title: 'Life Journey Prompts', category: 'Reflection',      description: 'Use life-journey prompts to tell your story and invite thoughtful responses.',     tags: ['story','meaning','support','self-awareness'],     actionLabel: 'View Profiles',      route: 'profiles' },
+  { id: 'growth-paths',       title: 'Growth Paths',         category: 'Planning',        description: 'Build a milestone-based growth path with accountability, updates, and collaborators.', tags: ['habits','milestones','accountability','planning'], actionLabel: 'Open Growth',        route: 'growth' },
+  { id: 'community-match',    title: 'Suggested Communities',category: 'Connection',      description: 'Discover communities that fit your goals, interests, and who you already follow.', tags: ['community','networking','support'],               actionLabel: 'Browse Communities', route: 'communities' },
+  { id: 'following-feed',     title: 'Following Feed',       category: 'Signals',         description: 'See what the people you follow are thinking about and sharing right now.',          tags: ['inspiration','signals','feed','updates','people'],actionLabel: 'Open Following',     route: 'following' },
+  { id: 'community-insights', title: 'Community Insights',   category: 'Analysis',        description: 'AI views like Community DNA, consensus maps, and member trajectory for deeper learning.', tags: ['analysis','research','patterns','insight','ai'],   actionLabel: 'Open Insights',      route: 'insights' },
+  { id: 'thread-starter',     title: 'Start a Thread',       category: 'Contribution',    description: 'Post a thread to start a conversation and get perspective from the community.',    tags: ['conversation','feedback','sharing'],              actionLabel: 'New Thread',         route: 'newThread' },
+  { id: 'direct-messages',    title: 'Direct Messages',      category: 'Connection',      description: 'Start a 1:1 conversation with someone whose signal lines up with yours.',          tags: ['conversation','support','networking'],            actionLabel: 'Open Messages',      route: 'messages' },
 ];
 
 // =============================================================================

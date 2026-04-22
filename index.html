@@ -724,6 +724,18 @@
       text-shadow: none;
     }
 
+    [data-theme="light"] .secondary-btn {
+      background: rgba(15,23,42,0.05);
+      color: var(--text);
+      border-color: var(--border);
+    }
+
+    [data-theme="light"] .secondary-btn:hover {
+      background: rgba(15,23,42,0.1);
+      color: var(--text-bright);
+      border-color: var(--gray);
+    }
+
     .danger-btn {
       background: rgba(204,0,0,0.1);
       color: #ff4444;
@@ -1460,6 +1472,10 @@
       margin-right: 4px;
       margin-bottom: 4px;
       color: var(--nav-link);
+    }
+
+    [data-theme="light"] .tag {
+      color: var(--green-dark);
     }
 
     /* Messaging */
@@ -4110,6 +4126,7 @@
     // ──────────────────────────────────────────
     function init() {
       onAuthStateChanged(auth, async (user) => {
+        const wasSignedIn = !!currentUser;
         if (user) {
           currentUser = user;
           await loadProfile(user.uid);
@@ -4118,7 +4135,10 @@
           });
           updateNav();
           listenNotifications();
-          if (currentView === 'login' || currentView === 'register' || currentView === 'forgotPassword') {
+          // Re-render home if we just transitioned from signed-out → signed-in
+          // (covers the async hydration case on page load where currentUser was
+          // briefly null and we rendered the logged-out landing page).
+          if (currentView === 'login' || currentView === 'register' || currentView === 'forgotPassword' || (currentView === 'home' && !wasSignedIn)) {
             showHome();
           }
         } else {
@@ -4126,6 +4146,11 @@
           currentProfile = null;
           if (notifsListener) { notifsListener(); notifsListener = null; }
           updateNav();
+          // If we just transitioned signed-in → signed-out on the home view,
+          // re-render so the feed is replaced with the logged-out landing page.
+          if (currentView === 'home' && wasSignedIn) {
+            showHome();
+          }
         }
       });
       showHome();
@@ -4267,11 +4292,65 @@
       await showHome(communityId);
     }
 
+    function renderLoggedOutLandingHtml() {
+      return `
+        <div style="text-align:center;padding:40px 20px 30px;">
+          <div style="font-size:48px;margin-bottom:16px;">&#x1F9ED;</div>
+          <h1 style="font-size:32px;color:var(--green);margin-bottom:10px;font-family:'JetBrains Mono',monospace;">JourneyHub</h1>
+          <p style="font-size:16px;color:var(--text);margin-bottom:6px;">AI-guided growth for builders who want better signal.</p>
+          <p style="font-size:13px;color:var(--gray);max-width:640px;margin:0 auto 24px;">Discover the right people, communities, resources, and next steps with more clarity and less noise. JourneyHub is built for founders, builders, and ambitious independents who want momentum.</p>
+          <div class="inline-actions" style="justify-content:center;margin-bottom:30px;">
+            <button onclick="window.showRegister()" style="padding:12px 28px;font-size:14px;">Start Your Growth Loop</button>
+            <button class="secondary-btn" onclick="window.showLogin()" style="padding:12px 28px;font-size:14px;">Log In</button>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:30px;">
+          <div class="profile-card" style="text-align:center;padding:20px;">
+            <div style="font-size:28px;margin-bottom:8px;">&#127919;</div>
+            <h3 style="font-size:14px;color:var(--text-bright);margin-bottom:4px;">Find Your Next Move</h3>
+            <p style="font-size:12px;color:var(--gray);">Start with a growth goal and let JourneyHub point you toward the right resources, communities, and people.</p>
+          </div>
+          <div class="profile-card" style="text-align:center;padding:20px;">
+            <div style="font-size:28px;margin-bottom:8px;">&#129504;</div>
+            <h3 style="font-size:14px;color:var(--text-bright);margin-bottom:4px;">AI-Guided Discovery</h3>
+            <p style="font-size:12px;color:var(--gray);">Use power search, insights, and the JourneyHub Guide to turn vague ambition into clear signal.</p>
+          </div>
+          <div class="profile-card" style="text-align:center;padding:20px;">
+            <div style="font-size:28px;margin-bottom:8px;">&#127970;</div>
+            <h3 style="font-size:14px;color:var(--text-bright);margin-bottom:4px;">Builders, Founders, Operators</h3>
+            <p style="font-size:12px;color:var(--gray);">Meet ambitious people who are building, learning, and sharing practical momentum.</p>
+          </div>
+          <div class="profile-card" style="text-align:center;padding:20px;">
+            <div style="font-size:28px;margin-bottom:8px;">&#127793;</div>
+            <h3 style="font-size:14px;color:var(--text-bright);margin-bottom:4px;">Momentum, Not Noise</h3>
+            <p style="font-size:12px;color:var(--gray);">Growth paths, saved resources, and community insight help you keep moving instead of doom-scrolling.</p>
+          </div>
+        </div>
+
+        <div class="profile-card" style="text-align:center;padding:20px;margin-bottom:24px;border-color:var(--green-border);">
+          <p style="font-size:13px;color:var(--text);margin-bottom:4px;">&#129504; AI Power Search &#183; &#128101; Community Discovery &#183; &#127793; Growth Paths &#183; &#128214; Saved Resources &#183; &#128270; Insight Tools</p>
+          <p style="font-size:11px;color:var(--gray);">Built to help you find high-signal opportunities, people, and next steps faster.</p>
+        </div>
+
+        <div style="text-align:center;padding:20px 0 40px;">
+          <button onclick="window.showRegister()" style="padding:12px 28px;font-size:14px;">Create Your Account</button>
+        </div>
+      `;
+    }
+
     async function showHome(communityId) {
       currentView = 'home';
       cleanupListeners();
       resetPageTitle();
       const appEl = document.getElementById('app');
+
+      // Logged-out users get a static landing page — no backend fetch needed.
+      if (!currentUser && !communityId) {
+        appEl.innerHTML = renderLoggedOutLandingHtml();
+        return;
+      }
+
       appEl.innerHTML = '<div class="loading">Loading threads...</div>';
 
       let threadsQuery;
@@ -5787,8 +5866,12 @@
     }
 
     function openResource(resourceId) {
-      const resource = getResourceById(resourceId);
-      if (!resource) return;
+      let resource = getResourceById(resourceId);
+      if (!resource) {
+        console.warn('openResource: unknown id', resourceId, '— opening the JourneyHub Guide as a fallback');
+        resource = getResourceById('journeyhub-guide');
+        if (!resource) return;
+      }
 
       if (currentUser) {
         trackJourneyEvent('resource_opened', { resourceId, route: resource.route || 'unknown' });
