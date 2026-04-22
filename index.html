@@ -3493,6 +3493,8 @@
     const PLATFORM_GUIDE_NAME = 'JourneyHub Guide';
     const SPARK_BOT_NAME = 'Spark Bot';
     const SPARK_BOT_ID = '__journeyhub_spark_bot__';
+    const FUTURE_SELF_BOT_ID = '__journeyhub_future_self__';
+    const futureSelfName = () => `You (${new Date().getFullYear() + 1})`;
     let threadsListener = null;
     let commentsListener = null;
     let coThinkListener = null;
@@ -7043,6 +7045,8 @@
             ? PLATFORM_GUIDE_NAME
             : conv.botType === 'sparkBot'
             ? SPARK_BOT_NAME
+            : conv.botType === 'futureSelf'
+            ? futureSelfName()
             : (conv.participantNames ? conv.participantNames.find(n => n !== currentUser.email.split('@')[0]) || 'Unknown' : 'Unknown');
           const hasUnread = conv.unreadBy && conv.unreadBy.includes(currentUser.uid);
           convListHtml += `
@@ -7106,6 +7110,8 @@
         ? PLATFORM_GUIDE_NAME
         : convData.botType === 'sparkBot'
         ? SPARK_BOT_NAME
+        : convData.botType === 'futureSelf'
+        ? futureSelfName()
         : (convData.participantNames ? convData.participantNames.find(n => n !== currentUser.email.split('@')[0]) || 'Unknown' : 'Unknown');
 
       chatArea.innerHTML = `

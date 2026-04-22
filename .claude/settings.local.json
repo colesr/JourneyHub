@@ -49,7 +49,10 @@
       "Bash(curl -s -c /tmp/jh-ai.txt -H 'Content-Type: application/json' -d '{\"email\":\"aitest@journeyhub.dev\",\"password\":\"testpass123\",\"username\":\"aitester\"}' https://journeyhub.cole-colesr-sam.workers.dev/api/auth/register)",
       "Bash(curl -s -H 'Content-Type: application/json' -d '{\"prompt\":\"Say hello\"}' https://journeyhub.cole-colesr-sam.workers.dev/api/ai)",
       "Bash(time curl *)",
-      "Bash(curl -s -b /tmp/jh-ai.txt -H 'Content-Type: application/json' -d '{\"prompt\":\"Summarize in one sentence: A user is asking the community for advice on moving from a senior engineer role to engineering management.\",\"maxTokens\":100}' https://journeyhub.cole-colesr-sam.workers.dev/api/ai)"
+      "Bash(curl -s -b /tmp/jh-ai.txt -H 'Content-Type: application/json' -d '{\"prompt\":\"Summarize in one sentence: A user is asking the community for advice on moving from a senior engineer role to engineering management.\",\"maxTokens\":100}' https://journeyhub.cole-colesr-sam.workers.dev/api/ai)",
+      "Bash(git restore *)",
+      "Bash(curl -s -c /tmp/jh-ghost.txt -H 'Content-Type: application/json' -d '{\"email\":\"ghosttest@journeyhub.dev\",\"password\":\"testpass123\",\"username\":\"ghosttester\"}' https://journeyhub.cole-colesr-sam.workers.dev/api/auth/register)",
+      "Bash(curl -s -b /tmp/jh-ghost.txt https://journeyhub.cole-colesr-sam.workers.dev/api/auth/me)"
     ]
   }
 }

@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { setCookie, getCookie, deleteCookie } from 'hono/cookie';
 import { handleDb } from './documents.js';
 import { ConversationRoom } from './conversation_room.js';
+import { maybeSpawnGhost } from './ghost.js';
 
 export { ConversationRoom };
 
@@ -263,6 +264,9 @@ app.get('/r2/*', async (c) => {
 app.get('/api/auth/me', (c) => {
   const user = c.get('user');
   if (!user) return c.json({ user: null });
+  c.executionCtx.waitUntil(
+    maybeSpawnGhost(c.env, user.user_id).catch((e) => console.error('ghost tick failed:', e)),
+  );
   return c.json({
     user: { id: user.user_id, email: user.email, username: user.username },
   });
