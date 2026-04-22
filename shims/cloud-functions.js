@@ -281,11 +281,18 @@ Generate your creative response. Be bold.`;
 async function summarizeThread(data, ctx) {
   requireAuth(ctx);
   const { title = '', content = '', comments = [] } = data || {};
-  const commentsBlock = (comments || []).map((c) => `- ${c.author}: ${c.content}`).join('\n');
-  const prompt = `Summarize this forum thread concisely in 2-3 sentences.
+  const commentsBlock = (comments || []).length
+    ? (comments || []).map((c) => `- ${c.author}: ${c.content}`).join('\n')
+    : '(no comments yet)';
+  const prompt = `Summarize this forum thread in 2-3 plain sentences describing what's being discussed.
 
-Title: ${title}
-Post: ${content}
+Rules:
+- Always produce a summary, even if content is short. Do NOT say "there's not enough information" or similar.
+- Output ONLY the summary text, no preamble like "Here's a summary:" and no markdown.
+- Base the summary on whatever content is provided.
+
+Title: ${title || '(untitled)'}
+Post body: ${content || '(no body — just the title)'}
 
 Comments:
 ${commentsBlock}`;
