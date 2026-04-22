@@ -126,20 +126,3 @@ export async function deleteUser(_user) {
   throw err;
 }
 
-export class GoogleAuthProvider {
-  constructor() {
-    this.providerId = 'google.com';
-    this._customParameters = {};
-    this._scopes = [];
-  }
-  setCustomParameters(params) { this._customParameters = { ...(params || {}) }; return this; }
-  addScope(scope) { this._scopes.push(scope); return this; }
-  static credential() { return null; }
-  static PROVIDER_ID = 'google.com';
-}
-
-export async function signInWithPopup(_auth, _provider) {
-  const err = new Error('Google sign-in not yet wired up in Cloudflare backend.');
-  err.code = 'auth/operation-not-supported';
-  throw err;
-}
