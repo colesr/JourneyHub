@@ -17,25 +17,20 @@ Runs entirely on Cloudflare's permanent free tier:
 ## Architecture
 
 - **`index.html`** — Entire frontend: styles (CSS custom properties in `:root`), HTML shell, and all application JS in a single `<script type="module">` block. Imports from `./shims/firebase-*.js` (not the Firebase CDN) — the shims expose the Firebase v9 modular API but route calls to the Cloudflare Worker. ~140+ handlers are exposed globally via `window.*` at the bottom of the file (~line 11230+).
-- **`worker/`** — Cloudflare Worker (Hono + D1 + R2).
-  - `worker/src/index.js` — routes: `/api/auth/*` (register, login, logout, me), `POST /api/db` (document store), `POST /api/upload` + `GET /r2/*` (image CRUD), static asset fallback via the `ASSETS` binding.
-  - `worker/src/documents.js` — generic JSON document store backed by a single `documents` table. Firestore-like ops: `getDoc`, `getDocs`, `setDoc`, `updateDoc`, `addDoc`, `deleteDoc`. Constraint evaluation (where/orderBy/limit) runs in-memory on the Worker.
+- **`worker/`** — Cloudflare Worker (Hono + D1 + R2 + Durable Objects).
+  - `worker/src/index.js` — routes: `/api/auth/*` (register, login, logout, me), `POST /api/db` (document store), `POST /api/upload` + `GET /r2/*` (image CRUD), `GET /api/ws/:convId` (WebSocket upgrade into a ConversationRoom DO), static asset fallback via the `ASSETS` binding.
+  - `worker/src/documents.js` — generic JSON document store backed by a single `documents` table. Firestore-like ops: `getDoc`, `getDocs`, `setDoc`, `updateDoc`, `addDoc`, `deleteDoc`. Constraint evaluation (where/orderBy/limit) runs in-memory on the Worker. After any write to `conversations/<id>/messages`, the matching ConversationRoom DO is notified to broadcast to connected WebSockets.
+  - `worker/src/conversation_room.js` — ConversationRoom Durable Object, one per conversation id. Uses the Hibernation API so idle sockets cost zero CPU.
   - `worker/schema.sql` — D1 schema: `users`, `sessions`, `documents` tables.
-  - `worker/wrangler.toml` — bindings: D1 (`DB`), R2 (`IMAGES`), static assets (`ASSETS`).
+  - `worker/wrangler.toml` — bindings: D1 (`DB`), R2 (`IMAGES`), Durable Objects (`CONVROOMS`), static assets (`ASSETS`).
 - **`shims/`** — Frontend shims preserving the Firebase v9 modular API surface so `index.html` never has to change.
   - `firebase-auth.js` — calls `/api/auth/*`, session via `httpOnly` cookie.
-  - `firebase-firestore.js` — calls `/api/db`; sentinels (`serverTimestamp`, `arrayUnion`, `increment`, etc.) resolved client-side via read-modify-write.
+  - `firebase-firestore.js` — calls `/api/db`; sentinels (`serverTimestamp`, `arrayUnion`, `increment`, etc.) resolved client-side via read-modify-write. `onSnapshot` on a conversation-messages collection also opens a WebSocket to `/api/ws/:convId` and refetches on each broadcast.
   - `firebase-storage.js` — uploads via `POST /api/upload`, URLs are relative `/r2/<path>`.
   - `firebase-app.js`, `firebase-functions.js` — minimal noop/pass-through shims.
-  - `cloud-functions.js` — browser-side implementations of the ~48 Firebase Callable Functions using Gemini directly.
+  - `cloud-functions.js` — browser-side implementations of the AI Callable Functions (summarize, improve, mood, community DNA, mentorship, resource search, etc.) using Gemini directly via `gemini.js`.
   - `gemini.js`, `api-key-modal.js` — Gemini client + modal prompting the user for their API key.
-- **`.assetsignore`** — lists files at the repo root the Worker should NOT serve as static assets (e.g. `worker/`, `functions/`, `CLAUDE.md`, `*.rules`).
-
-### Legacy paths (not deployed, kept for reference)
-
-- **`functions/`** — Firebase Cloud Functions (Node.js, ~48 callables using Gemini). Was the backend for the Firebase-hosted version; replaced by `worker/`. Gemini now runs client-side via `shims/gemini.js`.
-- **`firestore.rules`**, **`firestore.indexes.json`**, **`storage.rules`**, **`firebase.json`**, **`.firebaserc`** — Firebase config from the previous deploy.
-- **`server.js`**, **`railway.json`** — Railway static-hosting entry (served `index.html` + `shims/` via Express).
+- **`.assetsignore`** — lists files at the repo root the Worker should NOT serve as static assets (e.g. `worker/`, `CLAUDE.md`, `.claude/`).
 
 ## Database Model
 
@@ -57,8 +52,8 @@ Everything the app historically wrote to Firestore (`threads`, `comments`, `comm
 
 ## Real-time
 
-- **Same-client** — writes through the Firestore shim fire client-side listeners immediately via an in-memory event bus (same pattern as the prior localStorage shim).
-- **Cross-client** — not yet implemented. Planned via **Durable Objects + WebSockets** for DMs (Phase 4); other realtime (comments, notifications) may follow.
+- **Same-client** — writes through the Firestore shim fire client-side listeners immediately via an in-memory event bus.
+- **Cross-client (DMs)** — implemented via Durable Objects + hibernating WebSockets. `onSnapshot` on `conversations/<id>/messages` opens a WS that refetches on server push; writes to that collection notify the DO which broadcasts to participants. Other realtime (comments, notifications) still polls on navigation.
 
 ## Common Commands
 

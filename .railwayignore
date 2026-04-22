@@ -1,6 +1,0 @@
-# Don't deploy Firebase function code or local node_modules
-functions/
-.firebase/
-.git/
-.DS_Store
-firebase-debug.log
