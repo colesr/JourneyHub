@@ -23,3 +23,6 @@ class_name = "ConversationRoom"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ConversationRoom"]
+
+[ai]
+binding = "AI"

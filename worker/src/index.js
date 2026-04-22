@@ -151,6 +151,44 @@ app.post('/api/auth/logout', async (c) => {
 
 app.post('/api/db', handleDb);
 
+// AI inference via Cloudflare Workers AI. Uses Llama 3.1 8B Instruct by default;
+// callers can override the model per request. Auth required — AI calls cost
+// Neurons from our free-tier budget, so anonymous access is closed.
+const DEFAULT_AI_MODEL = '@cf/meta/llama-3.1-8b-instruct';
+
+app.post('/api/ai', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  const body = await c.req.json().catch(() => null);
+  if (!body || typeof body.prompt !== 'string' || !body.prompt.trim()) {
+    return c.json({ error: 'Missing prompt' }, 400);
+  }
+
+  const model = typeof body.model === 'string' ? body.model : DEFAULT_AI_MODEL;
+  const temperature = typeof body.temperature === 'number' ? body.temperature : 0.7;
+  const maxTokens = Math.min(typeof body.maxTokens === 'number' ? body.maxTokens : 1024, 2048);
+
+  const messages = [];
+  if (typeof body.systemInstruction === 'string' && body.systemInstruction.trim()) {
+    messages.push({ role: 'system', content: body.systemInstruction });
+  }
+  messages.push({ role: 'user', content: body.prompt });
+
+  try {
+    const result = await c.env.AI.run(model, {
+      messages,
+      temperature,
+      max_tokens: maxTokens,
+    });
+    const text = typeof result?.response === 'string' ? result.response : '';
+    return c.json({ text });
+  } catch (e) {
+    console.error('AI error:', e);
+    return c.json({ error: 'AI request failed: ' + (e?.message || 'unknown') }, 500);
+  }
+});
+
 app.get('/api/ws/:convId', async (c) => {
   if (c.req.header('upgrade') !== 'websocket') {
     return c.json({ error: 'Expected WebSocket' }, 426);

@@ -3472,8 +3472,6 @@
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail, sendEmailVerification, deleteUser } from './shims/firebase-auth.js';
     import { getFunctions, httpsCallable } from './shims/firebase-functions.js';
     import { getStorage, ref, uploadBytes, getDownloadURL } from './shims/firebase-storage.js';
-    import { openApiKeyModal as __openGeminiKeyModal } from './shims/api-key-modal.js';
-    window.openGeminiKeyModal = __openGeminiKeyModal;
 
     const app = initializeApp();
     const db = getFirestore(app);
@@ -4143,7 +4141,6 @@
             ${unreadCount > 0 ? `<span class="notif-badge">${unreadCount}</span>` : ''}
           </span>
           <a href="#" onclick="window.showProfile('${currentUser.uid}'); return false;">${escapeHtml(username)}</a>
-          <a href="#" title="Set Gemini API key" onclick="window.openGeminiKeyModal && window.openGeminiKeyModal(); return false;">AI key</a>
           <a href="#" onclick="window.logout(); return false;">logout</a>
         `;
       } else {
@@ -11599,7 +11596,7 @@
           <p>Be respectful. No hate speech, harassment, doxxing, or intentionally harmful content. Violations may result in content removal or account suspension.</p>
 
           <h2>5. AI Features</h2>
-          <p>JourneyHub uses AI (Google Gemini) for features like thread summarization, mood analysis, and comment improvement. AI-generated content is provided as-is and may not always be accurate.</p>
+          <p>JourneyHub uses AI hosted on Cloudflare's infrastructure for features like thread summarization, mood analysis, and comment improvement. AI-generated content is provided as-is and may not always be accurate.</p>
 
           <h2>6. Termination</h2>
           <p>You can delete your account at any time from your profile settings. We may suspend accounts that violate these terms.</p>
@@ -11627,7 +11624,7 @@
           <p>Email address (for authentication), profile information you provide (bio, interests, location), content you post (threads, comments, messages), and usage data (activity streaks, reactions).</p>
 
           <h2>2. How We Use It</h2>
-          <p>To operate the platform, show your profile to other members, send notifications, generate recommendations, and improve the service. We use Google Gemini AI to power features like mood analysis and content summarization.</p>
+          <p>To operate the platform, show your profile to other members, send notifications, generate recommendations, and improve the service. We use AI models hosted on Cloudflare to power features like mood analysis and content summarization.</p>
 
           <h2>3. What We Share</h2>
           <p>Your public profile and posts are visible to other members. We do not sell your data. We use Cloudflare (Workers, D1, R2) for hosting, authentication, and data storage.</p>

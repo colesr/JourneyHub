@@ -44,7 +44,12 @@
       "Bash(git remote *)",
       "Bash(git push *)",
       "Bash(curl -s -c /tmp/jh-cookies.txt -H 'Content-Type: application/json' -d '{\"email\":\"alice@journeyhub.dev\",\"password\":\"testpass123\",\"username\":\"alice\"}' https://journeyhub.cole-colesr-sam.workers.dev/api/auth/register)",
-      "Bash(curl --http1.1 -si -b /tmp/jh-cookies.txt -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' --max-time 3 https://journeyhub.cole-colesr-sam.workers.dev/api/ws/testconv)"
+      "Bash(curl --http1.1 -si -b /tmp/jh-cookies.txt -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' --max-time 3 https://journeyhub.cole-colesr-sam.workers.dev/api/ws/testconv)",
+      "Bash(grep -oE \"callGemini\\\\\\([^\\)]{0,50}\" /Users/samuelcole/Documents/CodingProjects/Forum/Forum/shims/cloud-functions.js)",
+      "Bash(curl -s -c /tmp/jh-ai.txt -H 'Content-Type: application/json' -d '{\"email\":\"aitest@journeyhub.dev\",\"password\":\"testpass123\",\"username\":\"aitester\"}' https://journeyhub.cole-colesr-sam.workers.dev/api/auth/register)",
+      "Bash(curl -s -H 'Content-Type: application/json' -d '{\"prompt\":\"Say hello\"}' https://journeyhub.cole-colesr-sam.workers.dev/api/ai)",
+      "Bash(time curl *)",
+      "Bash(curl -s -b /tmp/jh-ai.txt -H 'Content-Type: application/json' -d '{\"prompt\":\"Summarize in one sentence: A user is asking the community for advice on moving from a senior engineer role to engineering management.\",\"maxTokens\":100}' https://journeyhub.cole-colesr-sam.workers.dev/api/ai)"
     ]
   }
 }

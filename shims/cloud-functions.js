@@ -2,7 +2,7 @@
 // functions/index.js. Each entry on `dispatch` is invoked by the
 // firebase-functions shim's httpsCallable() with (data, ctx) where ctx.auth.uid
 // matches the current logged-in user. The 21 AI-calling functions hit the
-// Gemini REST API directly via callGemini(). Document triggers are registered
+// Gemini REST API directly via callAI(). Document triggers are registered
 // at module load via registerDocumentTrigger().
 
 import {
@@ -10,7 +10,7 @@ import {
   query, where, orderBy, limit, serverTimestamp, arrayUnion, arrayRemove,
   deleteField, Timestamp, registerDocumentTrigger, db,
 } from './firebase-firestore.js';
-import { callGemini, parseJsonLoose } from './gemini.js';
+import { callAI, parseJsonLoose } from './ai.js';
 
 // =============================================================================
 // CONSTANTS (mirrored from functions/index.js)
@@ -226,7 +226,7 @@ User just said: ${messageText}
 
 Reply as JourneyHub Guide.`;
   try {
-    return (await callGemini(prompt)).trim()
+    return (await callAI(prompt)).trim()
       || "I'm here — what can I help you find on JourneyHub?";
   } catch (e) {
     console.warn('platform guide AI failed', e);
@@ -266,7 +266,7 @@ User just said: ${messageText}
 
 Generate your creative response. Be bold.`;
   try {
-    return (await callGemini(prompt)).trim()
+    return (await callAI(prompt)).trim()
       || "My idea circuits overloaded for a sec. Try again — just say 'hit me' or give me a topic and I'll go wild.";
   } catch (e) {
     console.warn('spark bot AI failed', e);
@@ -289,7 +289,7 @@ Post: ${content}
 
 Comments:
 ${commentsBlock}`;
-  const summary = (await callGemini(prompt)).trim();
+  const summary = (await callAI(prompt)).trim();
   return { summary };
 }
 
@@ -302,7 +302,7 @@ Thread: ${threadTitle}
 Thread content: ${threadContent}
 
 Original comment: ${draft}`;
-  const improved = (await callGemini(prompt)).trim();
+  const improved = (await callAI(prompt)).trim();
   return { improved };
 }
 
@@ -312,7 +312,7 @@ async function suggestThreadDraft(data, ctx) {
   const prompt = `You are an AI assistant for a productivity community. Given the following thread draft content, suggest a concise yet engaging thread title (8 words max) and a 1-2 sentence summary for the first post. Return JSON with keys "title" and "summary" only.
 Content:
 ${content.trim()}`;
-  const text = await callGemini(prompt);
+  const text = await callAI(prompt);
   const parsed = parseJsonLoose(text);
   if (parsed && typeof parsed === 'object') {
     return { title: String(parsed.title || ''), summary: String(parsed.summary || '') };
@@ -335,7 +335,7 @@ label should be 2-4 words. summary should be 1-2 sentences. signals should be an
 
 Feed snapshot:
 ${block}`;
-  const raw = await callGemini(prompt);
+  const raw = await callAI(prompt);
   const parsed = parseJsonLoose(raw);
   if (parsed && typeof parsed === 'object') {
     return {
@@ -357,7 +357,7 @@ label should be 2-4 words. summary should be one sentence. cues should be an arr
 Type: ${interactionType}
 Context: ${contextTitle}
 Content: ${(content || '').trim()}`;
-  const raw = await callGemini(prompt);
+  const raw = await callAI(prompt);
   const parsed = parseJsonLoose(raw);
   if (parsed && typeof parsed === 'object') {
     return {
@@ -390,7 +390,7 @@ User goal: ${goalText.trim()}
 
 Catalog:
 ${catalogBlock}`;
-  const raw = await callGemini(prompt);
+  const raw = await callAI(prompt);
   const parsed = parseJsonLoose(raw);
   const validIds = new Set(GROWTH_RESOURCE_CATALOG.map((r) => r.id));
   if (parsed && typeof parsed === 'object') {
@@ -433,7 +433,7 @@ Example: ["product-design", "feedback", "ux"]
 
 Thread Title: ${title}
 Thread Content: ${content}`;
-  const raw = await callGemini(prompt);
+  const raw = await callAI(prompt);
   const parsed = parseJsonLoose(raw);
   let tags = [];
   if (Array.isArray(parsed)) tags = parsed;
@@ -484,7 +484,7 @@ ${block}
 
 Return a JSON object with keys: "consensus", "contradictions", "conditions", "evolution"
 Each should be an array of strings explaining the insights clearly.`;
-  const raw = await callGemini(prompt);
+  const raw = await callAI(prompt);
   const parsed = parseJsonLoose(raw);
   if (parsed && typeof parsed === 'object') {
     return {
@@ -522,7 +522,7 @@ Provide a JSON object with:
 - "masteredTopics": array of topics they're consistently knowledgeable about
 - "emergingExpertise": topics they're recently diving into
 - "growthEdges": suggested next learning areas based on their trajectory`;
-  const raw = await callGemini(prompt);
+  const raw = await callAI(prompt);
   const parsed = parseJsonLoose(raw);
   if (parsed && typeof parsed === 'object') {
     return {
@@ -587,7 +587,7 @@ Provide JSON with:
 - "implicitValues": array of values this community embodies (even unspoken ones)
 - "decisionPatterns": how decisions get made, what the community values in debate
 - "communityVoice": describe their tone, language patterns, how they communicate`;
-  const raw = await callGemini(prompt);
+  const raw = await callAI(prompt);
   const parsed = parseJsonLoose(raw);
   if (parsed && typeof parsed === 'object') {
     return {
@@ -645,7 +645,7 @@ MOOD: [one word - e.g. Anxious, Hopeful, Divided, Energized, Reflective, Tense, 
 EMOJI: [single emoji that captures the mood]
 SUMMARY: [2-3 sentences describing the overall emotional tone of the internet right now. Be specific about what's driving the mood. Write in present tense, conversational tone.]
 UNDERCURRENT: [1 sentence about a subtle secondary mood beneath the surface]`;
-  const raw = await callGemini(prompt);
+  const raw = await callAI(prompt);
   const mood = parseMoodResponse(raw);
   mood.headlineCount = headlines.length;
   mood.sourceCount = new Set(headlines.map((h) => (h.match(/^\[(.*?)\]/) || [])[1])).size;
@@ -679,7 +679,7 @@ MOOD: [one word - e.g. Anxious, Hopeful, Divided, Energized, Professional, Playf
 EMOJI: [single emoji that captures the mood]
 SUMMARY: [2-3 sentences describing the overall emotional tone and vibe of this website. What kind of energy does it project? How might a reader feel after visiting?]
 UNDERCURRENT: [1 sentence about a subtle secondary tone or intention beneath the surface]`;
-  const raw = await callGemini(prompt);
+  const raw = await callAI(prompt);
   const mood = parseMoodResponse(raw);
   mood.site = parsedUrl.hostname;
   return { mood };
@@ -706,7 +706,7 @@ MOOD: [one word - e.g. Supportive, Curious, Debating, Celebrating, Growing, Refl
 EMOJI: [single emoji that captures the mood]
 SUMMARY: [2-3 sentences describing the overall emotional temperature of this community. What topics are driving conversation? How are people interacting with each other?]
 UNDERCURRENT: [1 sentence about a deeper pattern or emerging theme you notice]`;
-  const raw = await callGemini(prompt);
+  const raw = await callAI(prompt);
   return { mood: parseMoodResponse(raw) };
 }
 
