@@ -531,86 +531,6 @@
       border-color: rgba(15,23,42,0.08) !important;
     }
 
-    .auth-divider {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin: 14px 0;
-      color: var(--gray);
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-
-    .auth-divider::before,
-    .auth-divider::after {
-      content: '';
-      flex: 1;
-      height: 1px;
-      background: linear-gradient(90deg, transparent, var(--border), transparent);
-    }
-
-    .google-auth-btn {
-      width: 100%;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      padding: 12px 16px;
-      border-radius: 10px;
-      border: 1px solid rgba(15, 23, 42, 0.12);
-      background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
-      color: #0f172a;
-      font-family: 'IBM Plex Mono', monospace;
-      font-size: 13px;
-      box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
-    }
-
-    .google-auth-btn:hover {
-      background: linear-gradient(180deg, #ffffff 0%, #eef2ff 100%);
-      border-color: rgba(59, 130, 246, 0.24);
-      color: #0f172a;
-      transform: translateY(-1px);
-      box-shadow: 0 12px 24px rgba(59, 130, 246, 0.12);
-    }
-
-    .google-auth-btn:active {
-      transform: translateY(0);
-    }
-
-    .google-auth-icon {
-      width: 18px;
-      height: 18px;
-      border-radius: 50%;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      background: conic-gradient(from 200deg, #34a853 0deg 90deg, #4285f4 90deg 180deg, #ea4335 180deg 270deg, #fbbc05 270deg 360deg);
-      position: relative;
-      flex-shrink: 0;
-    }
-
-    .google-auth-icon::after {
-      content: 'G';
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      background: #fff;
-      color: #1f2937;
-      font-size: 10px;
-      font-weight: 700;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      line-height: 1;
-    }
-
-    [data-theme="dark"] .google-auth-btn {
-      background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
-      color: #0f172a;
-      border-color: rgba(255, 255, 255, 0.08);
-    }
-
     .form-group {
       margin-bottom: 18px;
     }
@@ -3549,7 +3469,7 @@
     // See ./shims/ for implementations.
     import { initializeApp } from './shims/firebase-app.js';
     import { getFirestore, collection, addDoc, getDocs, getDoc, doc, setDoc, updateDoc, deleteDoc, deleteField, query, orderBy, where, onSnapshot, serverTimestamp, arrayUnion, arrayRemove, increment, limit as fsLimit } from './shims/firebase-firestore.js';
-    import { getAuth, GoogleAuthProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, signOut, onAuthStateChanged, sendPasswordResetEmail, sendEmailVerification, deleteUser } from './shims/firebase-auth.js';
+    import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail, sendEmailVerification, deleteUser } from './shims/firebase-auth.js';
     import { getFunctions, httpsCallable } from './shims/firebase-functions.js';
     import { getStorage, ref, uploadBytes, getDownloadURL } from './shims/firebase-storage.js';
     import { openApiKeyModal as __openGeminiKeyModal } from './shims/api-key-modal.js';
@@ -3841,20 +3761,6 @@
         .replace(/^-+|-+$/g, '')
         .slice(0, 24);
       return cleaned || 'member';
-    }
-
-    function buildGoogleProfileData(user) {
-      const email = user?.email || '';
-      const displayName = (user?.displayName || '').trim();
-      const username = normalizeUsernameSeed(displayName || email.split('@')[0] || 'member');
-      return {
-        ...buildDefaultProfileData(email),
-        username,
-        usernameLower: username.toLowerCase(),
-        headline: displayName && displayName.toLowerCase() !== username ? displayName : '',
-        profilePicture: user?.photoURL || '',
-        emailVerified: !!user?.emailVerified
-      };
     }
 
     function parseCommaSeparated(value) {
@@ -4916,11 +4822,6 @@
         <div class="auth-container">
           <h2>Return To Your Signal</h2>
           <p style="font-size:12px;color:var(--gray);margin-bottom:18px;">Log in to keep discovering the right resources, communities, people, and next moves.</p>
-          <button type="button" class="google-auth-btn" onclick="window.handleGoogleSignIn()">
-            <span class="google-auth-icon" aria-hidden="true"></span>
-            <span>Continue with Google</span>
-          </button>
-          <div class="auth-divider">or use your email</div>
           <form onsubmit="window.handleLogin(event); return false;">
             <div class="form-group">
               <label for="email">Email</label>
@@ -4997,11 +4898,6 @@
         <div class="auth-container">
           <h2>Start Your Growth Loop</h2>
           <p style="font-size:12px;color:var(--gray);margin-bottom:18px;">Join JourneyHub to find better signal: the right people, resources, communities, and next steps.</p>
-          <button type="button" class="google-auth-btn" onclick="window.handleGoogleSignIn()">
-            <span class="google-auth-icon" aria-hidden="true"></span>
-            <span>Continue with Google</span>
-          </button>
-          <div class="auth-divider">or create an account with email</div>
           <form onsubmit="window.handleRegister(event); return false;">
             <div class="form-group">
               <label for="email">Email</label>
@@ -5219,47 +5115,6 @@
         showMessage('Invalid email or password', 'error');
         btn.disabled = false;
         btn.textContent = 'Login';
-      }
-    }
-
-    async function handleGoogleSignIn() {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
-
-      try {
-        const result = await signInWithPopup(auth, provider);
-        const user = result.user;
-        const profileRef = doc(db, 'users', user.uid);
-        const profileSnap = await getDoc(profileRef);
-        const isNewProfile = !profileSnap.exists();
-
-        if (isNewProfile) {
-          await setDoc(profileRef, buildGoogleProfileData(user), { merge: true });
-          await sendWelcomeDM(user.uid, (user.displayName || user.email || 'member').split(' ')[0].split('@')[0]);
-          await processReferral(user.uid);
-          await trackJourneyEvent('signup_completed', { source: getRefParam() ? 'referral' : 'google' });
-        } else {
-          await setDoc(profileRef, {
-            email: user.email || profileSnap.data().email || '',
-            profilePicture: profileSnap.data().profilePicture || user.photoURL || '',
-            emailVerified: !!user.emailVerified
-          }, { merge: true });
-        }
-
-        await loadProfile(user.uid);
-        showHome();
-        showMessage(isNewProfile ? 'Welcome to JourneyHub!' : 'Logged in with Google!', 'success');
-      } catch (error) {
-        console.error('Google sign-in error:', error);
-        if (error.code === 'auth/popup-closed-by-user') {
-          showMessage('Google sign-in was closed before it finished.', 'info');
-        } else if (error.code === 'auth/popup-blocked') {
-          showMessage('Your browser blocked the Google sign-in popup. Allow popups and try again.', 'error');
-        } else if (error.code === 'auth/unauthorized-domain') {
-          showMessage('Google sign-in is not enabled for this domain in Firebase Authentication.', 'error');
-        } else {
-          showMessage('Error signing in with Google: ' + (error.message || 'Unknown error'), 'error');
-        }
       }
     }
 
@@ -11387,7 +11242,6 @@
     window.showEditThread = showEditThread;
     window.showEditCommunity = showEditCommunity;
     window.handleLogin = handleLogin;
-    window.handleGoogleSignIn = handleGoogleSignIn;
     window.handleRegister = handleRegister;
     window.logout = logout;
     window.submitThread = submitThread;
