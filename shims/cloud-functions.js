@@ -376,6 +376,138 @@ Content: ${(content || '').trim()}`;
   return { label: 'Mixed Tone', summary: raw, cues: [] };
 }
 
+async function generateSignalStorm(data, ctx) {
+  requireAuth(ctx);
+  const profile = data?.profile || {};
+  const recentThreads = Array.isArray(data?.recentThreads) ? data.recentThreads.slice(0, 5) : [];
+  const recentComments = Array.isArray(data?.recentComments) ? data.recentComments.slice(0, 5) : [];
+  const joinedCommunities = Array.isArray(data?.joinedCommunities) ? data.joinedCommunities.slice(0, 5) : [];
+  const growthPaths = Array.isArray(data?.growthPaths) ? data.growthPaths.slice(0, 4) : [];
+
+  const routeCatalog = [
+    { id: 'resources', label: 'Open Resources' },
+    { id: 'communities', label: 'Browse Communities' },
+    { id: 'growth', label: 'Open Growth Paths' },
+    { id: 'guide', label: 'Ask the Guide' },
+    { id: 'following', label: 'View Following Feed' },
+    { id: 'insights', label: 'Open Insights' },
+    { id: 'messages', label: 'Open Messages' },
+    { id: 'thoughtlab', label: 'Open Thought Lab' },
+  ];
+
+  const prompt = `You are generating a feature for JourneyHub called Signal Storm.
+It is a weird weekly feed hijack where the user receives 3 alternate-future transmissions based on their real activity.
+
+Write 3 unsettling but useful alternate futures. They should feel personal, specific, and slightly eerie, but never cruel.
+Use the user's actual profile, recent posts, comments, communities, and growth paths.
+Do not write generic advice. Each future should imply a different next move.
+
+Return JSON with keys:
+- title: short title for the storm
+- intro: 1-2 sentence intro
+- timelines: array of exactly 3 objects
+
+Each timeline object must have:
+- id: short slug
+- title: 3-6 words
+- transmission: 2-4 sentences in second person, vivid and specific
+- trait: short phrase describing what this future amplifies
+- shadow: short phrase describing the risk
+- boost: short phrase describing the gift
+- route: one of ${routeCatalog.map((r) => r.id).join(', ')}
+- routeLabel: matching CTA label
+
+User profile:
+Username: ${profile.username || 'member'}
+Headline: ${profile.headline || ''}
+Bio: ${profile.bio || ''}
+Current focus: ${profile.currentFocus || ''}
+Growth goal: ${profile.growthGoal || ''}
+Growth challenge: ${profile.growthChallenge || ''}
+Growth stage: ${profile.growthStage || ''}
+Preferred support: ${profile.preferredSupport || ''}
+Interests: ${(profile.interests || []).join(', ')}
+Expertise: ${(profile.expertiseAreas || []).join(', ')}
+Skills: ${(profile.skills || []).join(', ')}
+
+Recent threads:
+${recentThreads.map((t, i) => `[${i + 1}] ${t.title || '(untitled)'} — ${t.content || ''}`).join('\n') || '(none)'}
+
+Recent comments:
+${recentComments.map((c, i) => `[${i + 1}] ${c.content || ''}`).join('\n') || '(none)'}
+
+Joined communities:
+${joinedCommunities.map((c) => c.name || '').join(', ') || '(none)'}
+
+Growth paths:
+${growthPaths.map((p) => `${p.title || '(untitled)'} (${p.status || 'active'})`).join('\n') || '(none)'}
+
+Available routes:
+${routeCatalog.map((r) => `- ${r.id}: ${r.label}`).join('\n')}
+`;
+
+  const raw = await callAI(prompt, { temperature: 0.95, maxTokens: 1100 });
+  const parsed = parseJsonLoose(raw);
+  if (parsed && typeof parsed === 'object' && Array.isArray(parsed.timelines)) {
+    const validRoutes = new Map(routeCatalog.map((r) => [r.id, r.label]));
+    const timelines = parsed.timelines.slice(0, 3).map((timeline, index) => {
+      const route = validRoutes.has(timeline.route) ? timeline.route : routeCatalog[index % routeCatalog.length].id;
+      return {
+        id: String(timeline.id || `timeline-${index + 1}`),
+        title: String(timeline.title || `Timeline ${index + 1}`),
+        transmission: String(timeline.transmission || ''),
+        trait: String(timeline.trait || 'Unknown trait'),
+        shadow: String(timeline.shadow || 'Unclear cost'),
+        boost: String(timeline.boost || 'Possible opening'),
+        route,
+        routeLabel: String(timeline.routeLabel || validRoutes.get(route) || 'Open Path'),
+      };
+    });
+    return {
+      title: String(parsed.title || 'Signal Storm'),
+      intro: String(parsed.intro || 'Three alternate futures just cut across your feed.'),
+      timelines,
+    };
+  }
+
+  return {
+    title: 'Signal Storm',
+    intro: 'Three alternate futures just cut across your feed. Pick the one you want to provoke, reject, or partially absorb.',
+    timelines: [
+      {
+        id: 'quiet-operator',
+        title: 'The Quiet Operator',
+        transmission: 'You keep building in private until your work is good enough to stop apologizing for. The danger is that nobody knows where to find you when the thing is finally real. The gift is that your standards get sharper before the spotlight arrives.',
+        trait: 'private discipline',
+        shadow: 'invisibility',
+        boost: 'craft depth',
+        route: 'thoughtlab',
+        routeLabel: 'Open Thought Lab',
+      },
+      {
+        id: 'community-catalyst',
+        title: 'The Community Catalyst',
+        transmission: 'You stop trying to brute-force progress alone and start showing up where other builders can collide with your thinking. One conversation changes the slope of your next six months. The risk is dependence on noise; the upside is accelerated serendipity.',
+        trait: 'public momentum',
+        shadow: 'signal dilution',
+        boost: 'unexpected allies',
+        route: 'communities',
+        routeLabel: 'Browse Communities',
+      },
+      {
+        id: 'structured-rebuilder',
+        title: 'The Structured Rebuilder',
+        transmission: 'You admit that vague ambition is exhausting you, then turn your next chapter into milestones you can actually survive. It feels less romantic and much more real. The cost is confronting what matters most; the reward is visible traction.',
+        trait: 'deliberate structure',
+        shadow: 'constraint',
+        boost: 'traction',
+        route: 'growth',
+        routeLabel: 'Open Growth Paths',
+      },
+    ],
+  };
+}
+
 async function searchGrowthResources(data, ctx) {
   requireAuth(ctx);
   const goalText = (data && data.goalText) || '';
@@ -1268,6 +1400,7 @@ export const dispatch = {
   suggestThreadDraft,
   analyzeHomeMood,
   analyzeInteractionTone,
+  generateSignalStorm,
   searchGrowthResources,
   suggestThreadTags,
   analyzeCommunityConsensus,

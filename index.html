@@ -3462,16 +3462,38 @@
 
   <!-- Firebase SDK -->
   <script type="module">
-    // Firebase has been replaced with localStorage-backed shims that mimic the
-    // v9 modular SDK API exactly. The Cloud Functions backend is gone — all
-    // 48 callables now run client-side, and AI features call Gemini directly
-    // via REST using a key the user pastes into a settings modal.
-    // See ./shims/ for implementations.
+    // The app still speaks a Firebase-like API on the frontend, but these
+    // imports are local shims backed by the Cloudflare Worker in /worker.
     import { initializeApp } from './shims/firebase-app.js';
     import { getFirestore, collection, addDoc, getDocs, getDoc, doc, setDoc, updateDoc, deleteDoc, deleteField, query, orderBy, where, onSnapshot, serverTimestamp, arrayUnion, arrayRemove, increment, limit as fsLimit } from './shims/firebase-firestore.js';
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail, sendEmailVerification, deleteUser } from './shims/firebase-auth.js';
     import { getFunctions, httpsCallable } from './shims/firebase-functions.js';
     import { getStorage, ref, uploadBytes, getDownloadURL } from './shims/firebase-storage.js';
+    import {
+      BADGE_DEFS,
+      FUTURE_SELF_BOT_ID,
+      PLATFORM_GUIDE_NAME,
+      PLATFORM_GUIDE_USER_ID,
+      RESOURCE_LIBRARY,
+      SPARK_BOT_ID,
+      SPARK_BOT_NAME,
+      futureSelfName
+    } from './src/app-config.js';
+    import {
+      buildDefaultProfileData,
+      escapeAttr,
+      escapeHtml,
+      excerpt,
+      extractMentions,
+      formatTime,
+      getResourceById,
+      normalizeUrl,
+      normalizeUsernameSeed,
+      parseCommaSeparated,
+      renderTextWithMentions,
+      timestampToMillis
+    } from './src/app-utils.js';
+    import { createMessagingFeature } from './src/features/messaging.js';
 
     const app = initializeApp();
     const db = getFirestore(app);
@@ -3489,213 +3511,13 @@
     let editingCommentId = null;
     let replyingToCommentId = null;
     let editingJourneyResponseId = null;
-    const PLATFORM_GUIDE_USER_ID = '__journeyhub_platform_guide__';
-    const PLATFORM_GUIDE_NAME = 'JourneyHub Guide';
-    const SPARK_BOT_NAME = 'Spark Bot';
-    const SPARK_BOT_ID = '__journeyhub_spark_bot__';
-    const FUTURE_SELF_BOT_ID = '__journeyhub_future_self__';
-    const futureSelfName = () => `You (${new Date().getFullYear() + 1})`;
     let threadsListener = null;
     let commentsListener = null;
     let coThinkListener = null;
     let coThinkTimer = null;
-    let messagesListener = null;
     let notifsListener = null;
     let unreadCount = 0;
     let lastHomeMoodSignature = '';
-
-    // ──────────────────────────────────────────
-    // Badge definitions
-    // ──────────────────────────────────────────
-    const BADGE_DEFS = {
-      contributor: { label: 'Active Contributor', css: 'badge-contributor', minPosts: 5 },
-      expert: { label: 'Helpful Expert', css: 'badge-expert', minLikesReceived: 20 },
-      starter: { label: 'Conversation Starter', css: 'badge-starter', minThreads: 3 },
-      friendly: { label: 'Community Friend', css: 'badge-friendly', minFollowers: 5 }
-    };
-
-    const RESOURCE_LIBRARY = [
-      {
-        id: 'journeyhub-guide',
-        title: 'JourneyHub Guide DM',
-        category: 'AI Coach',
-        description: 'Ask the built-in guide anything about the platform, from navigation to how to use growth tools.',
-        tags: ['onboarding', 'navigation', 'questions', 'ai help'],
-        actionLabel: 'Open Messages',
-        route: 'messages'
-      },
-      {
-        id: 'profile-reflection',
-        title: 'Profile Reflection',
-        category: 'Self-Discovery',
-        description: 'Sharpen your profile so other people can understand your goals, strengths, and journey quickly.',
-        tags: ['clarity', 'identity', 'goals', 'reflection'],
-        actionLabel: 'Open Profile',
-        route: 'profile'
-      },
-      {
-        id: 'life-journey',
-        title: 'Life Journey Prompts',
-        category: 'Reflection',
-        description: 'Use the life journey section to tell your story and invite thoughtful responses from others.',
-        tags: ['story', 'meaning', 'support', 'self-awareness'],
-        actionLabel: 'View Profiles',
-        route: 'profiles'
-      },
-      {
-        id: 'growth-paths',
-        title: 'Growth Paths',
-        category: 'Planning',
-        description: 'Build a milestone-based growth path with accountability, updates, and collaborators.',
-        tags: ['habits', 'milestones', 'accountability', 'planning'],
-        actionLabel: 'Open Growth',
-        route: 'growth'
-      },
-      {
-        id: 'community-match',
-        title: 'Suggested Communities',
-        category: 'Connection',
-        description: 'Discover communities that fit your current goals, interests, and who you already follow.',
-        tags: ['community', 'networking', 'shared interests', 'support'],
-        actionLabel: 'Browse Communities',
-        route: 'communities'
-      },
-      {
-        id: 'following-feed',
-        title: 'Following Feed',
-        category: 'Signals',
-        description: 'See updates, reflections, and posts from people you follow so you can learn in context.',
-        tags: ['feed', 'inspiration', 'updates', 'signals'],
-        actionLabel: 'Open Following',
-        route: 'following'
-      },
-      {
-        id: 'community-insights',
-        title: 'Community Insights',
-        category: 'Analysis',
-        description: 'Use AI tools like Community DNA, consensus maps, and member trajectory to spot patterns.',
-        tags: ['analysis', 'patterns', 'insight', 'research'],
-        actionLabel: 'Open Insights',
-        route: 'insights'
-      },
-      {
-        id: 'thread-starter',
-        title: 'Thread Starter',
-        category: 'Expression',
-        description: 'Draft a thread about a goal, obstacle, or question and turn it into conversation.',
-        tags: ['writing', 'feedback', 'discussion', 'support'],
-        actionLabel: 'Create Thread',
-        route: 'newThread'
-      },
-      {
-        id: 'direct-messages',
-        title: 'Direct Messages',
-        category: 'Connection',
-        description: 'Reach out one-to-one for encouragement, accountability, and guidance.',
-        tags: ['mentor', 'support', '1:1', 'help'],
-        actionLabel: 'Open Messages',
-        route: 'messages'
-      },
-      {
-        id: 'coursera',
-        title: 'Coursera',
-        category: 'Learning',
-        description: 'Take structured courses and professional certificates for skill-building and career growth.',
-        collection: 'Career Tools',
-        tags: ['courses', 'career', 'skills', 'certificates'],
-        actionLabel: 'Visit Coursera',
-        route: 'external',
-        externalUrl: 'https://www.coursera.org/'
-      },
-      {
-        id: 'khan-academy',
-        title: 'Khan Academy',
-        category: 'Learning',
-        description: 'Use free lessons and practice to strengthen fundamentals at your own pace.',
-        collection: 'Career Tools',
-        tags: ['free learning', 'practice', 'education', 'skills'],
-        actionLabel: 'Visit Khan Academy',
-        route: 'external',
-        externalUrl: 'https://www.khanacademy.org/'
-      },
-      {
-        id: 'meetup',
-        title: 'Meetup',
-        category: 'Community',
-        description: 'Find local and virtual groups to learn together and build accountability around shared interests.',
-        collection: 'Career Tools',
-        tags: ['events', 'groups', 'networking', 'community'],
-        actionLabel: 'Visit Meetup',
-        route: 'external',
-        externalUrl: 'https://www.meetup.com/'
-      },
-      {
-        id: '7-cups',
-        title: '7 Cups',
-        category: 'Support',
-        description: 'Find peer support and listening resources when you want a compassionate place to talk.',
-        collection: 'Career Tools',
-        tags: ['support', 'wellbeing', 'listening', 'mental health'],
-        actionLabel: 'Visit 7 Cups',
-        route: 'external',
-        externalUrl: 'https://www.7cups.com/'
-      },
-      {
-        id: 'atomic-habits',
-        title: 'Atomic Habits',
-        category: 'Books',
-        description: 'A practical guide to changing habits through small, consistent improvements.',
-        collection: 'Books',
-        tags: ['habits', 'systems', 'discipline', 'self-improvement'],
-        actionLabel: 'Read More',
-        route: 'external',
-        externalUrl: 'https://jamesclear.com/atomic-habits'
-      },
-      {
-        id: 'deep-work',
-        title: 'Deep Work',
-        category: 'Books',
-        description: 'A useful framework for focus, deliberate practice, and creating meaningful work.',
-        collection: 'Books',
-        tags: ['focus', 'productivity', 'work', 'deep focus'],
-        actionLabel: 'Read More',
-        route: 'external',
-        externalUrl: 'https://www.calnewport.com/books/deep-work/'
-      },
-      {
-        id: 'ted-talks-daily',
-        title: 'TED Talks Daily',
-        category: 'Podcasts',
-        description: 'Short idea-rich talks that can spark reflection, curiosity, and fresh perspective.',
-        collection: 'Podcasts',
-        tags: ['ideas', 'inspiration', 'learning', 'perspective'],
-        actionLabel: 'Listen',
-        route: 'external',
-        externalUrl: 'https://www.ted.com/podcasts'
-      },
-      {
-        id: 'linkedin-learning',
-        title: 'LinkedIn Learning',
-        category: 'Career Tools',
-        description: 'Skill-building courses and role guides for career growth and practical learning paths.',
-        collection: 'Career Tools',
-        tags: ['career', 'skills', 'courses', 'learning'],
-        actionLabel: 'Visit LinkedIn Learning',
-        route: 'external',
-        externalUrl: 'https://www.linkedin.com/learning/'
-      },
-      {
-        id: 'google-career-certificates',
-        title: 'Google Career Certificates',
-        category: 'Career Tools',
-        description: 'Career-focused certificates to build job-ready skills and explore new pathways.',
-        collection: 'Career Tools',
-        tags: ['career', 'certificate', 'job skills', 'training'],
-        actionLabel: 'Visit Google Careers',
-        route: 'external',
-        externalUrl: 'https://www.google.com/about/careers/applications/programs/career-certificates/'
-      }
-    ];
 
     function renderBadges(badges) {
       if (!badges || badges.length === 0) return '';
@@ -3714,66 +3536,6 @@
       return !!(currentUser && ownerId && currentUser.uid === ownerId);
     }
 
-    function buildDefaultProfileData(email = '') {
-      const username = email.split('@')[0] || 'member';
-      return {
-        username,
-        usernameLower: username.toLowerCase(),
-        email,
-        headline: '',
-        bio: '',
-        location: '',
-        website: '',
-        statusNote: '',
-        currentFocus: '',
-        growthGoal: '',
-        growthChallenge: '',
-        growthStage: '',
-        preferredSupport: '',
-        lookingFor: '',
-        lifeJourney: '',
-        interests: [],
-        expertiseAreas: [],
-        skills: [],
-        askMeAbout: [],
-        projectsText: '',
-        favoriteQuote: '',
-        profilePicture: '',
-        joinDate: serverTimestamp(),
-        updatedAt: null,
-        reputation: 0,
-        badges: [],
-        followers: [],
-        following: [],
-        mutedUsers: [],
-        blockedUsers: [],
-        savedResources: [],
-        joinedPaths: [],
-        onboardingComplete: false,
-        onboardingSignalsSet: false
-      };
-    }
-
-    function normalizeUsernameSeed(value = '') {
-      const cleaned = (value || '')
-        .toLowerCase()
-        .replace(/[^a-z0-9_.-]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .slice(0, 24);
-      return cleaned || 'member';
-    }
-
-    function parseCommaSeparated(value) {
-      return (value || '').split(',').map(s => s.trim()).filter(Boolean);
-    }
-
-    function normalizeUrl(value) {
-      const url = (value || '').trim();
-      if (!url) return '';
-      if (/^https?:\/\//i.test(url)) return url;
-      return `https://${url}`;
-    }
-
     async function trackJourneyEvent(eventName, metadata = {}) {
       if (!currentUser) return;
       try {
@@ -3782,17 +3544,6 @@
       } catch (error) {
         console.debug('Analytics tracking skipped:', error?.message || error);
       }
-    }
-
-    function excerpt(text, limit = 180) {
-      const content = (text || '').trim();
-      if (!content) return '';
-      return content.length > limit ? `${content.slice(0, limit).trim()}...` : content;
-    }
-
-    function extractMentions(text) {
-      const matches = (text || '').match(/@([a-zA-Z0-9_.-]+)/g) || [];
-      return [...new Set(matches.map((match) => match.slice(1).toLowerCase()))];
     }
 
     async function resolveMentionedUsers(text) {
@@ -3806,19 +3557,6 @@
         snap.forEach((d) => found.push({ id: d.id, ...d.data() }));
       }));
       return found;
-    }
-
-    function renderTextWithMentions(text) {
-      return escapeHtml(text || '').replace(/(^|\s)@([a-zA-Z0-9_.-]+)/g, (match, prefix, username) => {
-        return `${prefix}<a href="#" onclick="window.openProfileByUsername('${escapeAttr(username.toLowerCase())}'); return false;">@${escapeHtml(username)}</a>`;
-      });
-    }
-
-    function timestampToMillis(timestamp) {
-      if (!timestamp) return 0;
-      if (timestamp.toMillis) return timestamp.toMillis();
-      if (timestamp.toDate) return timestamp.toDate().getTime();
-      return new Date(timestamp).getTime() || 0;
     }
 
     function getMutedUserIds() {
@@ -4027,6 +3765,269 @@
       }
     }
 
+    function getSignalStormWeekKey() {
+      const now = new Date();
+      const year = now.getUTCFullYear();
+      const start = Date.UTC(year, 0, 1);
+      const dayOfYear = Math.floor((Date.now() - start) / 86400000);
+      const week = Math.floor(dayOfYear / 7) + 1;
+      return `${year}-W${String(week).padStart(2, '0')}`;
+    }
+
+    function getSignalStormRouteAction(route) {
+      const routes = {
+        resources: 'window.showResources()',
+        communities: 'window.showCommunities()',
+        growth: 'window.showGrowthPaths()',
+        guide: 'window.openGuideConversation()',
+        following: 'window.showFollowingFeed()',
+        insights: 'window.showAnthropology()',
+        messages: 'window.showMessages()',
+        thoughtlab: 'window.showThoughtLab()'
+      };
+      return routes[route] || 'window.showResources()';
+    }
+
+    function renderSignalStormPanel(storm) {
+      if (!storm) {
+        return `
+          <div class="dashboard-panel" style="margin-bottom:18px;border-top:4px solid #ff6a00;background:linear-gradient(135deg, rgba(255,106,0,0.10), rgba(168,85,247,0.08));">
+            <h3 style="margin-bottom:8px;">Signal Storm</h3>
+            <div class="section-subtitle" style="margin-bottom:0;">Alternate futures are gathering...</div>
+          </div>
+        `;
+      }
+
+      const selectedTimeline = (storm.timelines || []).find((timeline) => timeline.id === storm.selectedTimelineId);
+      const activeRoute = selectedTimeline ? getSignalStormRouteAction(selectedTimeline.route) : 'window.showResources()';
+
+      return `
+        <div class="dashboard-panel" style="margin-bottom:18px;border-top:4px solid #ff6a00;background:
+          radial-gradient(circle at top right, rgba(168,85,247,0.18), transparent 36%),
+          linear-gradient(135deg, rgba(255,106,0,0.12), rgba(255,255,255,0.02));">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;">
+            <div>
+              <div class="resource-meta" style="color:#ffb36b;">Weekly anomaly</div>
+              <h3 style="margin:6px 0 8px;">${escapeHtml(storm.title || 'Signal Storm')}</h3>
+              <div class="section-subtitle" style="margin-bottom:0;max-width:720px;">${escapeHtml(storm.intro || '')}</div>
+            </div>
+            <div class="mini-meta" style="font-size:11px;">${escapeHtml(storm.weekKey || getSignalStormWeekKey())}</div>
+          </div>
+          ${selectedTimeline ? `
+            <div style="margin-top:14px;padding:12px;border:1px solid rgba(255,179,107,0.25);background:rgba(255,255,255,0.03);border-radius:6px;">
+              <div class="resource-meta" style="margin-bottom:6px;">Reality distortion active</div>
+              <div style="font-weight:600;color:var(--text-bright);margin-bottom:6px;">${escapeHtml(selectedTimeline.title)} • ${escapeHtml(storm.selectedAction || 'chosen')}</div>
+              <div class="comment-body" style="margin-bottom:10px;">${escapeHtml(storm.effectSummary || `For the next few days, JourneyHub will bias your next moves toward ${selectedTimeline.trait}.`)}</div>
+              <div class="inline-actions">
+                <button class="small-btn" onclick="${activeRoute}">${escapeHtml(selectedTimeline.routeLabel || 'Follow the distortion')}</button>
+                <button class="small-btn secondary-btn" onclick="window.regenerateSignalStorm()">Regenerate anomaly</button>
+              </div>
+            </div>
+          ` : ''}
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-top:14px;">
+            ${(storm.timelines || []).map((timeline) => `
+              <div class="profile-card" style="margin-bottom:0;border-color:${storm.selectedTimelineId === timeline.id ? 'rgba(255,106,0,0.55)' : 'var(--border)'};">
+                <div class="resource-meta" style="margin-bottom:6px;">Trait: ${escapeHtml(timeline.trait || 'unknown')}</div>
+                <h4 style="margin:0 0 8px;color:var(--text-bright);">${escapeHtml(timeline.title || 'Unknown timeline')}</h4>
+                <div class="comment-body" style="margin-bottom:10px;">${escapeHtml(timeline.transmission || '')}</div>
+                <div class="mini-meta" style="margin-bottom:4px;">Shadow: ${escapeHtml(timeline.shadow || '')}</div>
+                <div class="mini-meta" style="margin-bottom:10px;">Gift: ${escapeHtml(timeline.boost || '')}</div>
+                <div class="inline-actions" style="gap:6px;flex-wrap:wrap;">
+                  <button class="small-btn" onclick="window.chooseSignalStormAction('${escapeAttr(storm.id)}','${escapeAttr(timeline.id)}','accept')">Accept</button>
+                  <button class="small-btn secondary-btn" onclick="window.chooseSignalStormAction('${escapeAttr(storm.id)}','${escapeAttr(timeline.id)}','reject')">Reject</button>
+                  <button class="small-btn secondary-btn" style="background:#6a1b9a;" onclick="window.chooseSignalStormAction('${escapeAttr(storm.id)}','${escapeAttr(timeline.id)}','merge')">Merge</button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    async function buildSignalStormContext(profile) {
+      const [threadsSnap, commentsSnap, communitiesSnap] = await Promise.all([
+        getDocs(query(collection(db, 'threads'), where('authorId', '==', currentUser.uid), orderBy('timestamp', 'desc'), fsLimit(5))),
+        getDocs(query(collection(db, 'comments'), where('authorId', '==', currentUser.uid), orderBy('timestamp', 'desc'), fsLimit(5))),
+        getDocs(query(collection(db, 'communities'), orderBy('name', 'asc')))
+      ]);
+
+      const recentThreads = [];
+      threadsSnap.forEach((d) => recentThreads.push({ id: d.id, ...d.data() }));
+
+      const recentComments = [];
+      commentsSnap.forEach((d) => recentComments.push({ id: d.id, ...d.data() }));
+
+      const joinedCommunities = [];
+      communitiesSnap.forEach((d) => {
+        const community = { id: d.id, ...d.data() };
+        if ((community.members || []).includes(currentUser.uid)) joinedCommunities.push(community);
+      });
+
+      const growthPaths = [];
+      const joinedPathIds = Array.from(new Set([...(profile?.joinedPaths || [])]));
+      for (const pathId of joinedPathIds.slice(0, 4)) {
+        const pathSnap = await getDoc(doc(db, 'growthPaths', pathId));
+        if (pathSnap.exists()) growthPaths.push({ id: pathSnap.id, ...pathSnap.data() });
+      }
+
+      return {
+        profile: {
+          username: profile?.username || '',
+          headline: profile?.headline || '',
+          bio: profile?.bio || '',
+          currentFocus: profile?.currentFocus || '',
+          growthGoal: profile?.growthGoal || '',
+          growthChallenge: profile?.growthChallenge || '',
+          growthStage: profile?.growthStage || '',
+          preferredSupport: profile?.preferredSupport || '',
+          interests: profile?.interests || [],
+          expertiseAreas: profile?.expertiseAreas || [],
+          skills: profile?.skills || []
+        },
+        recentThreads: recentThreads.map((thread) => ({
+          title: thread.title || '',
+          content: excerpt(thread.content || '', 220)
+        })),
+        recentComments: recentComments.map((comment) => ({
+          content: excerpt(comment.content || '', 220)
+        })),
+        joinedCommunities: joinedCommunities.map((community) => ({
+          name: community.name || '',
+          description: excerpt(community.description || '', 140)
+        })),
+        growthPaths: growthPaths.map((path) => ({
+          title: path.title || '',
+          status: path.status || 'active'
+        }))
+      };
+    }
+
+    async function ensureSignalStorm(profile) {
+      if (!currentUser) return null;
+      const weekKey = getSignalStormWeekKey();
+      const stormId = `${currentUser.uid}_${weekKey}`;
+      const stormRef = doc(db, 'signalStorms', stormId);
+      const existing = await getDoc(stormRef);
+      if (existing.exists()) {
+        return { id: existing.id, ...existing.data() };
+      }
+
+      const generateStorm = httpsCallable(functions, 'generateSignalStorm');
+      const context = await buildSignalStormContext(profile);
+      const result = await generateStorm(context);
+      const payload = result.data || {};
+      const storm = {
+        weekKey,
+        title: payload.title || 'Signal Storm',
+        intro: payload.intro || 'Three alternate futures have leaked into your feed.',
+        timelines: Array.isArray(payload.timelines) ? payload.timelines.slice(0, 3) : [],
+        selectedTimelineId: null,
+        selectedAction: null,
+        effectSummary: '',
+        generatedAt: serverTimestamp(),
+        expiresAt: Date.now() + (7 * 24 * 60 * 60 * 1000)
+      };
+      await setDoc(stormRef, storm);
+      return { id: stormId, ...storm };
+    }
+
+    async function loadSignalStormPanel(profile) {
+      const panel = document.getElementById('signalStormPanel');
+      if (!panel || !currentUser) return;
+      panel.innerHTML = renderSignalStormPanel(null);
+      try {
+        const storm = await ensureSignalStorm(profile);
+        if (!panel) return;
+        panel.innerHTML = renderSignalStormPanel(storm);
+      } catch (error) {
+        console.error('Error loading Signal Storm:', error);
+        panel.innerHTML = '<div class="message info" style="margin-bottom:0;">Signal Storm is unstable right now.</div>';
+      }
+    }
+
+    async function chooseSignalStormAction(stormId, timelineId, action) {
+      if (!currentUser) return;
+      try {
+        const stormRef = doc(db, 'signalStorms', stormId);
+        const stormSnap = await getDoc(stormRef);
+        if (!stormSnap.exists()) throw new Error('Signal Storm not found');
+        const storm = { id: stormSnap.id, ...stormSnap.data() };
+        const timeline = (storm.timelines || []).find((item) => item.id === timelineId);
+        if (!timeline) throw new Error('Timeline not found');
+
+        const actionLabels = {
+          accept: 'You accepted this timeline. JourneyHub will lean into its signal this week.',
+          reject: 'You rejected this timeline. JourneyHub will push you toward the opposite edge.',
+          merge: 'You merged part of this timeline into the present. Expect stranger recommendations.',
+        };
+        const effectSummary = action === 'reject'
+          ? `You rejected ${timeline.title}. For the next few days, JourneyHub will bias you away from ${timeline.shadow || 'that pattern'} and toward experiments that break it.`
+          : action === 'merge'
+          ? `You merged ${timeline.title}. JourneyHub will mix ${timeline.trait || 'its signal'} into your recommendations without fully committing you to that path.`
+          : `You accepted ${timeline.title}. JourneyHub will bias your next moves toward ${timeline.trait || 'that signal'} and the doors it opens.`;
+
+        await updateDoc(stormRef, {
+          selectedTimelineId: timelineId,
+          selectedAction: action,
+          effectSummary,
+          chosenAt: serverTimestamp()
+        });
+
+        await setDoc(doc(db, 'users', currentUser.uid), {
+          signalStormEffect: {
+            weekKey: storm.weekKey,
+            timelineId,
+            timelineTitle: timeline.title,
+            action,
+            route: timeline.route || 'resources',
+            routeLabel: timeline.routeLabel || 'Follow the distortion',
+            effectSummary,
+            updatedAt: serverTimestamp()
+          }
+        }, { merge: true });
+
+        if (currentProfile) {
+          currentProfile.signalStormEffect = {
+            weekKey: storm.weekKey,
+            timelineId,
+            timelineTitle: timeline.title,
+            action,
+            route: timeline.route || 'resources',
+            routeLabel: timeline.routeLabel || 'Follow the distortion',
+            effectSummary
+          };
+        }
+
+        const refreshed = await getDoc(stormRef);
+        const panel = document.getElementById('signalStormPanel');
+        if (panel && refreshed.exists()) {
+          panel.innerHTML = renderSignalStormPanel({ id: refreshed.id, ...refreshed.data() });
+        }
+        showMessage(actionLabels[action] || 'Timeline updated.', 'success');
+      } catch (error) {
+        console.error('Error choosing Signal Storm action:', error);
+        showMessage('Error locking in that timeline', 'error');
+      }
+    }
+
+    async function regenerateSignalStorm() {
+      if (!currentUser) return;
+      try {
+        const weekKey = getSignalStormWeekKey();
+        const stormId = `${currentUser.uid}_${weekKey}`;
+        await deleteDoc(doc(db, 'signalStorms', stormId));
+        await setDoc(doc(db, 'users', currentUser.uid), {
+          signalStormEffect: deleteField()
+        }, { merge: true });
+        if (currentProfile) delete currentProfile.signalStormEffect;
+        await loadSignalStormPanel(currentProfile);
+        showMessage('A new anomaly is forming.', 'success');
+      } catch (error) {
+        console.error('Error regenerating Signal Storm:', error);
+        showMessage('Could not regenerate the anomaly', 'error');
+      }
+    }
+
     // ──────────────────────────────────────────
     // Init
     // ──────────────────────────────────────────
@@ -4075,7 +4076,7 @@
       } else {
         // Auto-create profile for legacy users
         const email = auth.currentUser?.email || '';
-        const profileData = buildDefaultProfileData(email);
+        const profileData = buildDefaultProfileData(email, serverTimestamp);
         await setDoc(doc(db, 'users', uid), profileData);
         currentProfile = { id: uid, ...profileData };
       }
@@ -4181,8 +4182,7 @@
     // Home – Thread List
     // ──────────────────────────────────────────
     function cleanupListeners() {
-      if (chatListener) { chatListener(); chatListener = null; }
-      if (messagesListener) { messagesListener(); messagesListener = null; }
+      messagingFeature.cleanupMessagingListeners();
       if (commentsListener) { commentsListener(); commentsListener = null; }
       if (threadsListener) { threadsListener(); threadsListener = null; }
       if (coThinkListener) { coThinkListener(); coThinkListener = null; }
@@ -4480,6 +4480,7 @@
               ${renderResourceCard(getResourceById('profile-reflection'), true)}
             </div>
           </div>
+          <div id="signalStormPanel"></div>
           ${renderPersonalizedNextStepsPanel(meProfile, suggestedCommunities)}
           <div class="dashboard-grid">
             <div>
@@ -4602,6 +4603,8 @@
             el.innerHTML = renderOnboardingCard(status);
           }
         });
+
+        loadSignalStormPanel(meProfile);
 
         // Load internet mood
         loadInternetMood();
@@ -5128,7 +5131,7 @@
         const cred = await createUserWithEmailAndPassword(auth, email, password);
         // Create user profile
         await setDoc(doc(db, 'users', cred.user.uid), {
-          ...buildDefaultProfileData(email)
+          ...buildDefaultProfileData(email, serverTimestamp)
         });
         showHome();
         // Welcome DM + referral + email verification
@@ -5683,10 +5686,6 @@
           ${item.body ? `<div class="feed-item-body">${escapeHtml(item.body)}</div>` : ''}
         </div>
       `;
-    }
-
-    function getResourceById(resourceId) {
-      return RESOURCE_LIBRARY.find((resource) => resource.id === resourceId) || null;
     }
 
     function getSavedResourceIds() {
@@ -7013,287 +7012,6 @@
     // ──────────────────────────────────────────
     // Messaging (Phase 2)
     // ──────────────────────────────────────────
-    let activeConvId = null;
-
-    async function showMessages() {
-      if (!currentUser) { showLogin(); return; }
-      currentView = 'messages';
-      activeConvId = null;
-      cleanupListeners();
-      const appEl = document.getElementById('app');
-      appEl.innerHTML = '<div class="loading">Loading messages...</div>';
-
-      await ensurePlatformGuideConversation();
-      await ensureSparkBot();
-
-      const convQuery = query(collection(db, 'conversations'), where('participants', 'array-contains', currentUser.uid), orderBy('lastMessageAt', 'desc'));
-
-      messagesListener = onSnapshot(convQuery, (snapshot) => {
-        const conversations = [];
-        snapshot.forEach(d => conversations.push({ id: d.id, ...d.data() }));
-
-        let convListHtml = '<h3>Conversations</h3>';
-        if (conversations.length === 0) {
-          convListHtml += '<div style="padding:15px;color:var(--gray);font-size:13px;">No conversations yet. Visit a member\'s profile to start one.</div>';
-        }
-        for (const conv of conversations) {
-          const otherParticipantId = (conv.participants || []).find((id) => id !== currentUser.uid);
-          if (otherParticipantId && otherParticipantId !== PLATFORM_GUIDE_USER_ID && isUserHidden(otherParticipantId)) {
-            continue;
-          }
-          const otherName = conv.botType === 'platformGuide'
-            ? PLATFORM_GUIDE_NAME
-            : conv.botType === 'sparkBot'
-            ? SPARK_BOT_NAME
-            : conv.botType === 'futureSelf'
-            ? futureSelfName()
-            : (conv.participantNames ? conv.participantNames.find(n => n !== currentUser.email.split('@')[0]) || 'Unknown' : 'Unknown');
-          const hasUnread = conv.unreadBy && conv.unreadBy.includes(currentUser.uid);
-          convListHtml += `
-            <div class="conv-item ${conv.id === activeConvId ? 'active' : ''}" onclick="window.openConversation('${conv.id}')">
-              <div class="conv-name">${escapeHtml(otherName)} ${hasUnread ? '<span class="unread-dot"></span>' : ''}</div>
-              <div class="conv-preview">${escapeHtml(conv.lastMessage || '')}</div>
-              <div class="conv-time">${formatTime(conv.lastMessageAt)}</div>
-            </div>
-          `;
-        }
-
-        // Only update conversation list, not the whole layout, if chat is open
-        const existingList = document.querySelector('.conversations-list');
-        if (existingList && activeConvId) {
-          existingList.innerHTML = convListHtml;
-        } else {
-          appEl.innerHTML = `
-            <div class="messaging-layout">
-              <div class="conversations-list">${convListHtml}</div>
-              <div class="chat-area">
-                <div class="chat-empty">Select a conversation</div>
-              </div>
-            </div>
-          `;
-        }
-
-        // Auto-open a conversation if one was requested
-        if (pendingConvOpen) {
-          const convToOpen = pendingConvOpen;
-          pendingConvOpen = null;
-          openConversation(convToOpen);
-        }
-      });
-    }
-
-    async function openGuideConversation() {
-      if (!currentUser) { showLogin(); return; }
-      const conversationId = await ensurePlatformGuideConversation();
-      await trackJourneyEvent('guide_opened', { source: currentView || 'unknown' });
-      pendingConvOpen = conversationId;
-      await showMessages();
-    }
-
-    let chatListener = null;
-
-    async function openConversation(convId) {
-      if (chatListener) chatListener();
-      activeConvId = convId;
-
-      // Mark as read
-      const convRef = doc(db, 'conversations', convId);
-      await updateDoc(convRef, { unreadBy: arrayRemove(currentUser.uid) });
-
-      const chatArea = document.querySelector('.chat-area');
-      if (!chatArea) return;
-
-      const convSnap = await getDoc(convRef);
-      if (!convSnap.exists()) { showMessage('Conversation not found', 'error'); return; }
-      const convData = convSnap.data();
-      const otherName = convData.botType === 'platformGuide'
-        ? PLATFORM_GUIDE_NAME
-        : convData.botType === 'sparkBot'
-        ? SPARK_BOT_NAME
-        : convData.botType === 'futureSelf'
-        ? futureSelfName()
-        : (convData.participantNames ? convData.participantNames.find(n => n !== currentUser.email.split('@')[0]) || 'Unknown' : 'Unknown');
-
-      chatArea.innerHTML = `
-        <div class="chat-header">${escapeHtml(otherName)}</div>
-        <div class="chat-messages" id="chatMessages"><div class="loading">Loading...</div></div>
-        <div class="chat-input">
-          <input type="text" id="msgInput" placeholder="Type a message..." onkeydown="if(event.key==='Enter'){window.sendMessage('${convId}');event.preventDefault();}">
-          <button onclick="window.sendMessage('${convId}')">Send</button>
-        </div>
-      `;
-
-      // Highlight active conversation
-      document.querySelectorAll('.conv-item').forEach(el => el.classList.remove('active'));
-      document.querySelectorAll('.conv-item').forEach(el => {
-        if (el.getAttribute('onclick')?.includes(convId)) el.classList.add('active');
-      });
-
-      const msgsQuery = query(collection(db, 'conversations', convId, 'messages'), orderBy('timestamp', 'asc'));
-      chatListener = onSnapshot(msgsQuery, (snapshot) => {
-        const messages = [];
-        snapshot.forEach(d => messages.push({ id: d.id, ...d.data() }));
-
-        const chatMsgs = document.getElementById('chatMessages');
-        if (!chatMsgs) return;
-
-        if (messages.length === 0) {
-          chatMsgs.innerHTML = '<div class="chat-empty">No messages yet. Say hello!</div>';
-          return;
-        }
-
-        let html = '';
-        for (const msg of messages) {
-          const isMine = msg.authorId === currentUser.uid;
-          html += `
-            <div class="chat-msg ${isMine ? 'mine' : ''}">
-              <div class="msg-author">${isMine ? 'you' : escapeHtml(msg.author)}</div>
-              <div class="msg-bubble">${renderTextWithMentions(msg.content || '')}</div>
-              <div class="msg-time">${formatTime(msg.timestamp)}</div>
-            </div>
-          `;
-        }
-        chatMsgs.innerHTML = html;
-        chatMsgs.scrollTop = chatMsgs.scrollHeight;
-      });
-    }
-
-    async function sendMessage(convId) {
-      const input = document.getElementById('msgInput');
-      const text = input.value.trim();
-      if (!text) return;
-      input.value = '';
-
-      try {
-        const username = currentUser.email.split('@')[0];
-        await addDoc(collection(db, 'conversations', convId, 'messages'), {
-          content: text,
-          author: username,
-          authorId: currentUser.uid,
-          timestamp: serverTimestamp()
-        });
-
-        const convSnap = await getDoc(doc(db, 'conversations', convId));
-        if (!convSnap.exists()) return;
-        const convData = convSnap.data();
-        const otherId = convData.participants.find(p => p !== currentUser.uid);
-        const isPlatformGuide = convData.botType === 'platformGuide' || otherId === PLATFORM_GUIDE_USER_ID;
-
-        await updateDoc(doc(db, 'conversations', convId), {
-          lastMessage: text,
-          lastMessageAt: serverTimestamp(),
-          unreadBy: isPlatformGuide ? arrayRemove(currentUser.uid) : arrayUnion(otherId)
-        });
-
-        // Notify the other user
-        if (!isPlatformGuide) {
-          await addNotification(otherId, 'message', `${username} sent you a message`, null);
-        }
-      } catch (error) {
-        console.error('Error sending message:', error);
-        showMessage('Error sending message', 'error');
-      }
-    }
-
-    async function findPlatformGuideConversationId() {
-      if (!currentUser) return null;
-      const snap = await getDocs(query(collection(db, 'conversations'), where('participants', 'array-contains', currentUser.uid)));
-      let conversationId = null;
-      snap.forEach((d) => {
-        const data = d.data();
-        if (data.botType === 'platformGuide' || (data.participants || []).includes(PLATFORM_GUIDE_USER_ID)) {
-          conversationId = d.id;
-        }
-      });
-      return conversationId;
-    }
-
-    async function createLocalPlatformGuideConversation() {
-      const username = currentProfile?.username || currentUser.email.split('@')[0] || 'member';
-      const welcomeMessage = `Hi ${username}, I am ${PLATFORM_GUIDE_NAME}. JourneyHub is built to help builders find better signal: the right resources, communities, people, and next steps. Tell me what you are trying to grow, and I will help you find the best place to start.`;
-
-      const convRef = await addDoc(collection(db, 'conversations'), {
-        participants: [currentUser.uid, PLATFORM_GUIDE_USER_ID],
-        participantNames: [username, PLATFORM_GUIDE_NAME],
-        lastMessage: welcomeMessage,
-        lastMessageAt: serverTimestamp(),
-        unreadBy: [currentUser.uid],
-        botType: 'platformGuide',
-        botUserId: PLATFORM_GUIDE_USER_ID,
-        createdAt: serverTimestamp()
-      });
-
-      await addDoc(collection(db, 'conversations', convRef.id, 'messages'), {
-        content: welcomeMessage,
-        author: PLATFORM_GUIDE_NAME,
-        authorId: PLATFORM_GUIDE_USER_ID,
-        timestamp: serverTimestamp(),
-        botType: 'platformGuide'
-      });
-
-      await addNotification(currentUser.uid, 'message', `${PLATFORM_GUIDE_NAME} sent you a welcome message`, null);
-      return convRef.id;
-    }
-
-    async function ensurePlatformGuideConversation() {
-      if (!currentUser) return null;
-      const existingConversationId = await findPlatformGuideConversationId();
-      if (existingConversationId) return existingConversationId;
-
-      try {
-        const fn = httpsCallable(functions, 'ensurePlatformGuideConversation');
-        const result = await fn();
-        const createdConversationId = result.data?.conversationId || null;
-        if (createdConversationId) return createdConversationId;
-      } catch (error) {
-        console.error('Error ensuring platform guide conversation:', error);
-      }
-
-      const fallbackConversationId = await findPlatformGuideConversationId();
-      if (fallbackConversationId) return fallbackConversationId;
-
-      try {
-        return await createLocalPlatformGuideConversation();
-      } catch (fallbackError) {
-        console.error('Error creating local platform guide conversation:', fallbackError);
-        return null;
-      }
-    }
-
-    let pendingConvOpen = null;
-
-    async function startConversation(otherUserId, otherUsername) {
-      if (!currentUser) return;
-      // Check if conversation already exists
-      const q = query(collection(db, 'conversations'), where('participants', 'array-contains', currentUser.uid));
-      const snap = await getDocs(q);
-      let existingConvId = null;
-      snap.forEach(d => {
-        if (d.data().participants.includes(otherUserId)) {
-          existingConvId = d.id;
-        }
-      });
-
-      if (existingConvId) {
-        pendingConvOpen = existingConvId;
-        await showMessages();
-        return;
-      }
-
-      // Create new conversation
-      const myUsername = currentUser.email.split('@')[0];
-      const convRef = await addDoc(collection(db, 'conversations'), {
-        participants: [currentUser.uid, otherUserId],
-        participantNames: [myUsername, otherUsername],
-        lastMessage: '',
-        lastMessageAt: serverTimestamp(),
-        unreadBy: []
-      });
-
-      pendingConvOpen = convRef.id;
-      await showMessages();
-    }
-
     // ──────────────────────────────────────────
     // Communities (Phase 3)
     // ──────────────────────────────────────────
@@ -8268,6 +7986,54 @@
         updateNav();
       });
     }
+
+    async function ensureSparkBotConversation() {
+      if (!currentUser) return;
+      try {
+        const fn = httpsCallable(functions, 'ensureSparkBotConversation');
+        await fn({});
+      } catch (e) {
+        console.error('Error ensuring spark bot:', e);
+      }
+    }
+
+    const messagingFeature = createMessagingFeature({
+      db,
+      functions,
+      getCurrentUser: () => currentUser,
+      getCurrentProfile: () => currentProfile,
+      getCurrentView: () => currentView,
+      setCurrentView: (view) => { currentView = view; },
+      cleanupListeners,
+      showLogin,
+      showMessage,
+      trackJourneyEvent,
+      addNotification,
+      isUserHidden,
+      ensureSparkBotConversation,
+      collection,
+      query,
+      where,
+      orderBy,
+      onSnapshot,
+      getDocs,
+      getDoc,
+      addDoc,
+      updateDoc,
+      doc,
+      arrayRemove,
+      arrayUnion,
+      serverTimestamp,
+      httpsCallable,
+      escapeHtml,
+      formatTime,
+      renderTextWithMentions,
+      PLATFORM_GUIDE_USER_ID,
+      PLATFORM_GUIDE_NAME,
+      SPARK_BOT_ID,
+      SPARK_BOT_NAME,
+      futureSelfName
+    });
 
     async function showNotifications() {
       if (!currentUser) return;
@@ -9581,6 +9347,15 @@
       const signals = [];
 
       try {
+        if (currentProfile.signalStormEffect?.timelineTitle) {
+          signals.push({
+            icon: '🌀',
+            text: `Signal Storm active: ${currentProfile.signalStormEffect.timelineTitle} (${currentProfile.signalStormEffect.action})`,
+            action: getSignalStormRouteAction(currentProfile.signalStormEffect.route || 'resources'),
+            priority: 5
+          });
+        }
+
         const interests = [...(currentProfile.interests || []), ...(currentProfile.expertiseAreas || [])];
         const following = currentProfile.following || [];
 
@@ -10410,6 +10185,15 @@
       const interests = [...(currentProfile.interests || []), ...(currentProfile.expertiseAreas || [])].map(s => s.toLowerCase());
 
       try {
+        if (currentProfile.signalStormEffect?.timelineTitle) {
+          recs.push({
+            type: 'storm',
+            text: `Follow the ${currentProfile.signalStormEffect.timelineTitle} distortion`,
+            action: getSignalStormRouteAction(currentProfile.signalStormEffect.route || 'resources'),
+            priority: 6
+          });
+        }
+
         // New members in your interest area
         const usersSnap = await getDocs(query(collection(db, 'users'), orderBy('joinDate', 'desc'), fsLimit(20)));
         usersSnap.forEach(d => {
@@ -10711,32 +10495,6 @@
       document.title = 'JourneyHub — AI-Guided Growth For Builders';
       updateMetaTag('og:title', 'JourneyHub — AI-Guided Growth For Builders');
       updateMetaTag('og:description', 'An AI-guided growth network for builders and founders who want better signal, stronger communities, and clearer next steps.');
-    }
-
-    function escapeHtml(text) {
-      if (!text) return '';
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
-    }
-
-    function escapeAttr(text) {
-      if (!text) return '';
-      return text.replace(/&/g, '&amp;').replace(/'/g, '&#39;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    }
-
-    function formatTime(timestamp) {
-      if (!timestamp) return 'just now';
-      const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-      const now = new Date();
-      const diff = now - date;
-      const minutes = Math.floor(diff / 60000);
-      const hours = Math.floor(diff / 3600000);
-      const days = Math.floor(diff / 86400000);
-      if (minutes < 1) return 'just now';
-      if (minutes < 60) return `${minutes}m ago`;
-      if (hours < 24) return `${hours}h ago`;
-      return `${days}d ago`;
     }
 
     function showMessage(text, type) {
@@ -11281,6 +11039,16 @@
     window.submitFeedPost = submitFeedPost;
     window.deleteFeedPost = deleteFeedPost;
     window.analyzeInteraction = analyzeInteraction;
+    const {
+      ensurePlatformGuideConversation,
+      openConversation,
+      openGuideConversation,
+      openSparkBot,
+      sendMessage,
+      showMessages,
+      startConversation
+    } = messagingFeature;
+
     window.showMessages = showMessages;
     window.openGuideConversation = openGuideConversation;
     window.openConversation = openConversation;
@@ -11340,6 +11108,8 @@
     window.showMoodAnalyzer = showMoodAnalyzer;
     window.switchMoodTab = switchMoodTab;
     window.runMoodAnalysis = runMoodAnalysis;
+    window.chooseSignalStormAction = chooseSignalStormAction;
+    window.regenerateSignalStorm = regenerateSignalStorm;
     window.showThoughtLab = showThoughtLab;
     window.showNewIdea = showNewIdea;
     window.saveIdea = saveIdea;
@@ -11926,31 +11696,6 @@
     // ──────────────────────────────────────────
     // Spark Bot
     // ──────────────────────────────────────────
-    async function ensureSparkBot() {
-      if (!currentUser) return;
-      try {
-        const fn = httpsCallable(functions, 'ensureSparkBotConversation');
-        await fn({});
-      } catch (e) {
-        console.error('Error ensuring spark bot:', e);
-      }
-    }
-
-    async function openSparkBot() {
-      if (!currentUser) { showLogin(); return; }
-      try {
-        const fn = httpsCallable(functions, 'ensureSparkBotConversation');
-        const result = await fn({});
-        const convId = result.data.convId;
-        await showMessages();
-        // Wait for messages view to render then open the conversation
-        pendingConvOpen = convId;
-      } catch (e) {
-        console.error('Error opening spark bot:', e);
-        showMessage('Error opening Spark Bot', 'error');
-      }
-    }
-
     // Nav dropdowns
     function toggleNavDropdown(id) {
       const el = document.getElementById(id);
