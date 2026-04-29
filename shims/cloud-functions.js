@@ -508,6 +508,267 @@ ${routeCatalog.map((r) => `- ${r.id}: ${r.label}`).join('\n')}
   };
 }
 
+async function hauntReputation(data, ctx) {
+  requireAuth(ctx);
+  const profile = data?.profile || {};
+  const recentThreads = Array.isArray(data?.recentThreads) ? data.recentThreads.slice(0, 4) : [];
+  const olderThreads = Array.isArray(data?.olderThreads) ? data.olderThreads.slice(0, 4) : [];
+  const recentComments = Array.isArray(data?.recentComments) ? data.recentComments.slice(0, 4) : [];
+
+  const prompt = `You are generating a JourneyHub feature called Reputation Haunting.
+The goal is to surface tension between a user's past and current persona in a way that feels eerie, observant, and useful.
+
+Return JSON with keys:
+- title
+- summary
+- witnesses: array of exactly 3 short "ghost witness" lines from the user's past voice
+- contradiction: one sentence about the tension
+- verdict: one sentence about whether the user has genuinely changed, gone dormant, or just rebranded
+- challenge: one provocative question
+
+Current profile:
+Username: ${profile.username || 'member'}
+Headline: ${profile.headline || ''}
+Current focus: ${profile.currentFocus || ''}
+Growth goal: ${profile.growthGoal || ''}
+Bio: ${profile.bio || ''}
+
+Recent threads:
+${recentThreads.map((t, i) => `[${i + 1}] ${t.title || ''} — ${t.content || ''}`).join('\n') || '(none)'}
+
+Older threads:
+${olderThreads.map((t, i) => `[${i + 1}] ${t.title || ''} — ${t.content || ''}`).join('\n') || '(none)'}
+
+Recent comments:
+${recentComments.map((c, i) => `[${i + 1}] ${c.content || ''}`).join('\n') || '(none)'}
+
+The voice should feel like archived versions of the user are testifying. Never be cruel; be sharp and uncanny.`;
+
+  const raw = await callAI(prompt, { temperature: 0.9, maxTokens: 700 });
+  const parsed = parseJsonLoose(raw);
+  if (parsed && typeof parsed === 'object') {
+    return {
+      title: String(parsed.title || 'Reputation Haunting'),
+      summary: String(parsed.summary || ''),
+      witnesses: Array.isArray(parsed.witnesses) ? parsed.witnesses.map(String).slice(0, 3) : [],
+      contradiction: String(parsed.contradiction || ''),
+      verdict: String(parsed.verdict || ''),
+      challenge: String(parsed.challenge || ''),
+    };
+  }
+  return {
+    title: 'Reputation Haunting',
+    summary: raw,
+    witnesses: [],
+    contradiction: '',
+    verdict: '',
+    challenge: '',
+  };
+}
+
+async function generateEnemyMentor(data, ctx) {
+  requireAuth(ctx);
+  const profile = data?.profile || {};
+  const recentThreads = Array.isArray(data?.recentThreads) ? data.recentThreads.slice(0, 4) : [];
+  const recentComments = Array.isArray(data?.recentComments) ? data.recentComments.slice(0, 4) : [];
+
+  const prompt = `You are generating a JourneyHub feature called Enemy Mentor Mode.
+Invent a fictional rival version of the user who is slightly ahead of them and painfully honest.
+
+Return JSON with keys:
+- rivalName
+- archetype
+- overview
+- mockery: array of 3 short things this rival would mock
+- steals: array of 3 things this rival would steal or emulate
+- drills: array of 3 concrete brutal-but-fair assignments
+- finalWarning: one sentence
+
+User profile:
+Username: ${profile.username || 'member'}
+Headline: ${profile.headline || ''}
+Current focus: ${profile.currentFocus || ''}
+Growth goal: ${profile.growthGoal || ''}
+Growth challenge: ${profile.growthChallenge || ''}
+Interests: ${(profile.interests || []).join(', ')}
+Expertise: ${(profile.expertiseAreas || []).join(', ')}
+
+Recent threads:
+${recentThreads.map((t, i) => `[${i + 1}] ${t.title || ''} — ${t.content || ''}`).join('\n') || '(none)'}
+
+Recent comments:
+${recentComments.map((c, i) => `[${i + 1}] ${c.content || ''}`).join('\n') || '(none)'}
+
+Tone: witty, severe, observant, but ultimately trying to make them stronger.`;
+
+  const raw = await callAI(prompt, { temperature: 0.95, maxTokens: 850 });
+  const parsed = parseJsonLoose(raw);
+  if (parsed && typeof parsed === 'object') {
+    return {
+      rivalName: String(parsed.rivalName || 'The Rival'),
+      archetype: String(parsed.archetype || 'Strategic menace'),
+      overview: String(parsed.overview || ''),
+      mockery: Array.isArray(parsed.mockery) ? parsed.mockery.map(String).slice(0, 3) : [],
+      steals: Array.isArray(parsed.steals) ? parsed.steals.map(String).slice(0, 3) : [],
+      drills: Array.isArray(parsed.drills) ? parsed.drills.map(String).slice(0, 3) : [],
+      finalWarning: String(parsed.finalWarning || ''),
+    };
+  }
+  return {
+    rivalName: 'The Rival',
+    archetype: 'Strategic menace',
+    overview: raw,
+    mockery: [],
+    steals: [],
+    drills: [],
+    finalWarning: '',
+  };
+}
+
+async function generateDoomsdayScenario(data, ctx) {
+  requireAuth(ctx);
+  const profile = data?.profile || {};
+  const growthPaths = Array.isArray(data?.growthPaths) ? data.growthPaths.slice(0, 4) : [];
+  const prompt = `You are generating a JourneyHub feature called Doomsday Co-Founder Simulator.
+Invent one catastrophic but plausible project crisis tailored to the user's current ambitions.
+
+Return JSON with keys:
+- title
+- scenario
+- stakes
+- team: array of 3 fictional collaborator roles with a one-line trait each
+- choices: array of exactly 3 objects with keys id, label, consequence
+- aftershock: one sentence
+
+User profile:
+Username: ${profile.username || 'member'}
+Current focus: ${profile.currentFocus || ''}
+Growth goal: ${profile.growthGoal || ''}
+Growth challenge: ${profile.growthChallenge || ''}
+Preferred support: ${profile.preferredSupport || ''}
+Projects: ${profile.projectsText || ''}
+
+Growth paths:
+${growthPaths.map((p) => `${p.title || ''} (${p.status || 'active'})`).join('\n') || '(none)'}
+
+The scenario should feel intense, specific, and decision-forcing.`;
+
+  const raw = await callAI(prompt, { temperature: 0.95, maxTokens: 900 });
+  const parsed = parseJsonLoose(raw);
+  if (parsed && typeof parsed === 'object') {
+    return {
+      title: String(parsed.title || 'System Failure'),
+      scenario: String(parsed.scenario || ''),
+      stakes: String(parsed.stakes || ''),
+      team: Array.isArray(parsed.team) ? parsed.team.map(String).slice(0, 3) : [],
+      choices: Array.isArray(parsed.choices) ? parsed.choices.slice(0, 3).map((choice, i) => ({
+        id: String(choice.id || `choice-${i + 1}`),
+        label: String(choice.label || `Choice ${i + 1}`),
+        consequence: String(choice.consequence || ''),
+      })) : [],
+      aftershock: String(parsed.aftershock || ''),
+    };
+  }
+  return {
+    title: 'System Failure',
+    scenario: raw,
+    stakes: '',
+    team: [],
+    choices: [],
+    aftershock: '',
+  };
+}
+
+async function generateSocialWeather(data, ctx) {
+  requireAuth(ctx);
+  const recentThreads = Array.isArray(data?.recentThreads) ? data.recentThreads.slice(0, 8) : [];
+  const prompt = `You are generating a JourneyHub feature called Social Weather.
+Create a weird temporary condition that changes how people post for a week.
+
+Return JSON with keys:
+- weather
+- atmosphere
+- postingRule
+- encouraged
+- forbidden
+- prompts: array of exactly 3 prompt ideas
+
+Recent community threads:
+${recentThreads.map((t, i) => `[${i + 1}] ${t.title || ''} — ${t.content || ''}`).join('\n') || '(none)'}
+
+It should feel memorable, slightly surreal, but still usable in a real product.`;
+
+  const raw = await callAI(prompt, { temperature: 0.98, maxTokens: 700 });
+  const parsed = parseJsonLoose(raw);
+  if (parsed && typeof parsed === 'object') {
+    return {
+      weather: String(parsed.weather || 'Radical Honesty Front'),
+      atmosphere: String(parsed.atmosphere || ''),
+      postingRule: String(parsed.postingRule || ''),
+      encouraged: String(parsed.encouraged || ''),
+      forbidden: String(parsed.forbidden || ''),
+      prompts: Array.isArray(parsed.prompts) ? parsed.prompts.map(String).slice(0, 3) : [],
+    };
+  }
+  return {
+    weather: 'Radical Honesty Front',
+    atmosphere: raw,
+    postingRule: '',
+    encouraged: '',
+    forbidden: '',
+    prompts: [],
+  };
+}
+
+async function fuseIdentitySnapshot(data, ctx) {
+  requireAuth(ctx);
+  const currentProfile = data?.currentProfile || {};
+  const snapshot = data?.snapshot || {};
+  const prompt = `You are generating a JourneyHub feature called The Museum of Abandoned Selves.
+The user is fusing an archived ambition with their current identity.
+
+Return JSON with keys:
+- headline
+- currentFocus
+- growthGoal
+- mergedSummary
+- epitaph
+
+Current self:
+Headline: ${currentProfile.headline || ''}
+Current focus: ${currentProfile.currentFocus || ''}
+Growth goal: ${currentProfile.growthGoal || ''}
+Bio: ${currentProfile.bio || ''}
+
+Archived self:
+Headline: ${snapshot.headline || ''}
+Current focus: ${snapshot.currentFocus || ''}
+Growth goal: ${snapshot.growthGoal || ''}
+Bio: ${snapshot.bio || ''}
+Label: ${snapshot.label || ''}
+
+Make the merge feel coherent, slightly poetic, but practical enough to save back into a profile.`;
+
+  const raw = await callAI(prompt, { temperature: 0.88, maxTokens: 500 });
+  const parsed = parseJsonLoose(raw);
+  if (parsed && typeof parsed === 'object') {
+    return {
+      headline: String(parsed.headline || currentProfile.headline || snapshot.headline || ''),
+      currentFocus: String(parsed.currentFocus || currentProfile.currentFocus || snapshot.currentFocus || ''),
+      growthGoal: String(parsed.growthGoal || currentProfile.growthGoal || snapshot.growthGoal || ''),
+      mergedSummary: String(parsed.mergedSummary || ''),
+      epitaph: String(parsed.epitaph || ''),
+    };
+  }
+  return {
+    headline: currentProfile.headline || snapshot.headline || '',
+    currentFocus: currentProfile.currentFocus || snapshot.currentFocus || '',
+    growthGoal: currentProfile.growthGoal || snapshot.growthGoal || '',
+    mergedSummary: raw,
+    epitaph: '',
+  };
+}
+
 async function searchGrowthResources(data, ctx) {
   requireAuth(ctx);
   const goalText = (data && data.goalText) || '';
@@ -1401,6 +1662,11 @@ export const dispatch = {
   analyzeHomeMood,
   analyzeInteractionTone,
   generateSignalStorm,
+  hauntReputation,
+  generateEnemyMentor,
+  generateDoomsdayScenario,
+  generateSocialWeather,
+  fuseIdentitySnapshot,
   searchGrowthResources,
   suggestThreadTags,
   analyzeCommunityConsensus,

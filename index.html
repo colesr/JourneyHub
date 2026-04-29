@@ -4028,6 +4028,546 @@
       }
     }
 
+    function buildIdentitySnapshotPayload(reason = 'manual') {
+      const profile = currentProfile || {};
+      return {
+        userId: currentUser.uid,
+        reason,
+        label: profile.growthGoal || profile.currentFocus || profile.headline || profile.username || 'Unknown self',
+        username: profile.username || currentUser.email.split('@')[0],
+        headline: profile.headline || '',
+        bio: profile.bio || '',
+        currentFocus: profile.currentFocus || '',
+        growthGoal: profile.growthGoal || '',
+        growthChallenge: profile.growthChallenge || '',
+        growthStage: profile.growthStage || '',
+        preferredSupport: profile.preferredSupport || '',
+        projectsText: profile.projectsText || '',
+        interests: profile.interests || [],
+        expertiseAreas: profile.expertiseAreas || [],
+        skills: profile.skills || [],
+        status: 'active',
+        createdAt: serverTimestamp()
+      };
+    }
+
+    async function archiveIdentitySnapshot(reason = 'manual') {
+      if (!currentUser || !currentProfile) return null;
+      try {
+        const latestSnap = await getDocs(query(
+          collection(db, 'identitySnapshots'),
+          where('userId', '==', currentUser.uid),
+          orderBy('createdAt', 'desc'),
+          fsLimit(1)
+        ));
+        const payload = buildIdentitySnapshotPayload(reason);
+        let shouldWrite = true;
+        latestSnap.forEach((d) => {
+          const data = d.data();
+          if (
+            (data.growthGoal || '') === payload.growthGoal &&
+            (data.currentFocus || '') === payload.currentFocus &&
+            (data.headline || '') === payload.headline &&
+            (data.bio || '') === payload.bio
+          ) {
+            shouldWrite = false;
+          }
+        });
+        if (!shouldWrite) return null;
+        return await addDoc(collection(db, 'identitySnapshots'), payload);
+      } catch (error) {
+        console.error('Error archiving identity snapshot:', error);
+        return null;
+      }
+    }
+
+    async function ensureSocialWeather(seedThreads = []) {
+      const weekKey = getSignalStormWeekKey();
+      const weatherId = `global_${weekKey}`;
+      const weatherRef = doc(db, 'socialWeather', weatherId);
+      const existing = await getDoc(weatherRef);
+      if (existing.exists()) return { id: existing.id, ...existing.data() };
+
+      const generateWeather = httpsCallable(functions, 'generateSocialWeather');
+      const result = await generateWeather({
+        recentThreads: (seedThreads || []).slice(0, 8).map((thread) => ({
+          title: thread.title || '',
+          content: excerpt(thread.content || '', 180)
+        }))
+      });
+      const payload = result.data || {};
+      const weather = {
+        weekKey,
+        weather: payload.weather || 'Radical Honesty Front',
+        atmosphere: payload.atmosphere || '',
+        postingRule: payload.postingRule || '',
+        encouraged: payload.encouraged || '',
+        forbidden: payload.forbidden || '',
+        prompts: Array.isArray(payload.prompts) ? payload.prompts.slice(0, 3) : [],
+        createdAt: serverTimestamp()
+      };
+      await setDoc(weatherRef, weather);
+      return { id: weatherId, ...weather };
+    }
+
+    function renderSocialWeatherPanel(weather, compact = false) {
+      if (!weather) {
+        return '<div class="dashboard-panel" style="margin-bottom:18px;"><div class="loading">Forecasting social weather...</div></div>';
+      }
+      return `
+        <div class="dashboard-panel" style="margin-bottom:${compact ? '12px' : '18px'};border-top:4px solid #1565c0;background:
+          radial-gradient(circle at top left, rgba(21,101,192,0.16), transparent 35%),
+          linear-gradient(135deg, rgba(21,101,192,0.10), rgba(255,255,255,0.02));">
+          <div class="resource-meta" style="color:#8ec5ff;">Social Weather</div>
+          <h3 style="margin:6px 0 8px;">${escapeHtml(weather.weather || 'Unknown front')}</h3>
+          <div class="comment-body" style="margin-bottom:10px;">${escapeHtml(weather.atmosphere || '')}</div>
+          <div class="mini-meta" style="margin-bottom:6px;">Rule: ${escapeHtml(weather.postingRule || '')}</div>
+          <div class="mini-meta" style="margin-bottom:6px;">Encouraged: ${escapeHtml(weather.encouraged || '')}</div>
+          <div class="mini-meta" style="margin-bottom:10px;">Forbidden: ${escapeHtml(weather.forbidden || '')}</div>
+          ${(weather.prompts || []).length ? `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">${weather.prompts.map((prompt) => `<span class="tag">${escapeHtml(prompt)}</span>`).join('')}</div>` : ''}
+          ${compact ? '' : `<div class="inline-actions"><button class="small-btn secondary-btn" onclick="window.showSocialWeatherLab()">Open Weather Desk</button></div>`}
+        </div>
+      `;
+    }
+
+    async function loadSocialWeatherHomePanel(seedThreads = []) {
+      const panel = document.getElementById('socialWeatherHomePanel');
+      if (!panel || !currentUser) return;
+      panel.innerHTML = renderSocialWeatherPanel(null, true);
+      try {
+        const weather = await ensureSocialWeather(seedThreads);
+        panel.innerHTML = renderSocialWeatherPanel(weather, true);
+      } catch (error) {
+        console.error('Error loading social weather panel:', error);
+        panel.innerHTML = '<div class="message info" style="margin-bottom:0;">The forecast is scrambled right now.</div>';
+      }
+    }
+
+    async function loadThreadWeatherPanel() {
+      const panel = document.getElementById('threadWeatherPanel');
+      if (!panel || !currentUser) return;
+      try {
+        const weather = await ensureSocialWeather();
+        panel.innerHTML = `
+          <div class="message info" style="margin-bottom:12px;border-left-color:#1565c0;background:var(--info-bg);color:var(--text);">
+            <strong>${escapeHtml(weather.weather)}</strong>:
+            ${escapeHtml(weather.postingRule || weather.atmosphere || '')}
+          </div>
+        `;
+      } catch (error) {
+        console.error('Error loading thread weather panel:', error);
+      }
+    }
+
+    async function showChaosLab() {
+      if (!currentUser) { showLogin(); return; }
+      currentView = 'chaosLab';
+      cleanupListeners();
+      const appEl = document.getElementById('app');
+      appEl.innerHTML = '<div class="loading">Opening Chaos Lab...</div>';
+
+      try {
+        const [weather, snapshotsSnap, stormsSnap] = await Promise.all([
+          ensureSocialWeather(),
+          getDocs(query(collection(db, 'identitySnapshots'), where('userId', '==', currentUser.uid), orderBy('createdAt', 'desc'), fsLimit(12))),
+          getDocs(query(collection(db, 'signalStorms'), orderBy('generatedAt', 'desc'), fsLimit(5)))
+        ]);
+
+        const snapshots = [];
+        snapshotsSnap.forEach((d) => snapshots.push({ id: d.id, ...d.data() }));
+        let activeStorm = null;
+        stormsSnap.forEach((d) => {
+          if (!activeStorm && d.id.startsWith(`${currentUser.uid}_`)) activeStorm = { id: d.id, ...d.data() };
+        });
+
+        appEl.innerHTML = `
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px;">
+            <div>
+              <h1 style="margin-bottom:6px;">Chaos Lab</h1>
+              <div class="section-subtitle" style="margin-bottom:0;">Five slightly dangerous product experiments for keeping builders alert, self-aware, and a little unnerved.</div>
+            </div>
+            <div class="inline-actions">
+              <button class="small-btn" onclick="window.archiveCurrentSelf()">Archive Current Self</button>
+              <button class="small-btn secondary-btn" onclick="window.showHome()">Back Home</button>
+            </div>
+          </div>
+          ${renderSocialWeatherPanel(weather)}
+          <div class="dashboard-grid">
+            <div>
+              <div class="dashboard-panel">
+                <h3>Live Experiments</h3>
+                <div class="section-subtitle" style="margin-bottom:12px;">Open one and let the platform become slightly less trustworthy.</div>
+                <div class="resource-grid">
+                  <div class="resource-card featured" onclick="window.showReputationHaunting()" style="cursor:pointer;"><h4>Reputation Haunting</h4><div class="resource-description">Let archived versions of you testify against your current persona.</div></div>
+                  <div class="resource-card featured" onclick="window.showEnemyMentorMode()" style="cursor:pointer;"><h4>Enemy Mentor Mode</h4><div class="resource-description">Meet the rival version of you who is already making bolder moves.</div></div>
+                  <div class="resource-card featured" onclick="window.showDoomsdaySimulator()" style="cursor:pointer;"><h4>Doomsday Simulator</h4><div class="resource-description">Get dropped into a catastrophic founder scenario and pick a path.</div></div>
+                  <div class="resource-card featured" onclick="window.showSocialWeatherLab()" style="cursor:pointer;"><h4>Social Weather</h4><div class="resource-description">Impose surreal posting conditions on the platform for the week.</div></div>
+                  <div class="resource-card featured" onclick="window.showMuseumOfAbandonedSelves()" style="cursor:pointer;"><h4>Museum Of Abandoned Selves</h4><div class="resource-description">Walk through archived ambitions and revive, bury, or fuse them.</div></div>
+                </div>
+              </div>
+            </div>
+            <div>
+              <div class="dashboard-panel">
+                <h3>Current Distortions</h3>
+                <div class="section-subtitle" style="margin-bottom:12px;">The weirdness already attached to your account.</div>
+                ${activeStorm ? `<div class="comment-body" style="margin-bottom:10px;">Signal Storm: <strong>${escapeHtml(activeStorm.title || 'Active')}</strong></div>` : '<div class="message info" style="margin-bottom:10px;">No active Signal Storm found.</div>'}
+                ${currentProfile?.signalStormEffect ? `<div class="mini-meta" style="margin-bottom:10px;">Current distortion: ${escapeHtml(currentProfile.signalStormEffect.timelineTitle || 'unknown')} (${escapeHtml(currentProfile.signalStormEffect.action || 'active')})</div>` : ''}
+                <div class="mini-meta">${snapshots.length} archived selves in the museum.</div>
+              </div>
+            </div>
+          </div>
+        `;
+      } catch (error) {
+        console.error('Error opening Chaos Lab:', error);
+        appEl.innerHTML = '<div class="message error">Chaos Lab is unstable right now.</div>';
+      }
+    }
+
+    async function showReputationHaunting() {
+      if (!currentUser) { showLogin(); return; }
+      currentView = 'reputationHaunting';
+      cleanupListeners();
+      const appEl = document.getElementById('app');
+      appEl.innerHTML = '<div class="loading">Summoning your old reputation...</div>';
+      try {
+        const [recentThreadsSnap, olderThreadsSnap, commentsSnap] = await Promise.all([
+          getDocs(query(collection(db, 'threads'), where('authorId', '==', currentUser.uid), orderBy('timestamp', 'desc'), fsLimit(4))),
+          getDocs(query(collection(db, 'threads'), where('authorId', '==', currentUser.uid), orderBy('timestamp', 'asc'), fsLimit(4))),
+          getDocs(query(collection(db, 'comments'), where('authorId', '==', currentUser.uid), orderBy('timestamp', 'desc'), fsLimit(4)))
+        ]);
+        const recentThreads = []; recentThreadsSnap.forEach((d) => recentThreads.push(d.data()));
+        const olderThreads = []; olderThreadsSnap.forEach((d) => olderThreads.push(d.data()));
+        const recentComments = []; commentsSnap.forEach((d) => recentComments.push(d.data()));
+
+        const haunt = httpsCallable(functions, 'hauntReputation');
+        const result = await haunt({
+          profile: currentProfile || {},
+          recentThreads,
+          olderThreads,
+          recentComments
+        });
+        const data = result.data || {};
+
+        appEl.innerHTML = `
+          <a href="#" class="back-link" onclick="window.showChaosLab(); return false;">&#8592; back to chaos lab</a>
+          <div class="dashboard-panel" style="border-top:4px solid #cc0000;">
+            <h2>${escapeHtml(data.title || 'Reputation Haunting')}</h2>
+            <div class="section-subtitle">${escapeHtml(data.summary || '')}</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:18px;">
+              ${(data.witnesses || []).map((w, i) => `<div class="profile-card"><div class="resource-meta">Ghost witness ${i + 1}</div><div class="comment-body">${escapeHtml(w)}</div></div>`).join('')}
+            </div>
+            <div class="profile-card" style="margin-top:16px;">
+              <h3>Contradiction</h3>
+              <div class="comment-body">${escapeHtml(data.contradiction || '')}</div>
+              <div class="mini-meta" style="margin-top:8px;">Verdict: ${escapeHtml(data.verdict || '')}</div>
+              <div class="resource-description" style="margin-top:10px;">${escapeHtml(data.challenge || '')}</div>
+            </div>
+          </div>
+        `;
+      } catch (error) {
+        console.error('Error opening Reputation Haunting:', error);
+        appEl.innerHTML = '<div class="message error">The ghosts refused to testify.</div>';
+      }
+    }
+
+    async function showEnemyMentorMode() {
+      if (!currentUser) { showLogin(); return; }
+      currentView = 'enemyMentor';
+      cleanupListeners();
+      const appEl = document.getElementById('app');
+      appEl.innerHTML = '<div class="loading">Generating your rival...</div>';
+      try {
+        const [recentThreadsSnap, commentsSnap] = await Promise.all([
+          getDocs(query(collection(db, 'threads'), where('authorId', '==', currentUser.uid), orderBy('timestamp', 'desc'), fsLimit(4))),
+          getDocs(query(collection(db, 'comments'), where('authorId', '==', currentUser.uid), orderBy('timestamp', 'desc'), fsLimit(4)))
+        ]);
+        const recentThreads = []; recentThreadsSnap.forEach((d) => recentThreads.push(d.data()));
+        const recentComments = []; commentsSnap.forEach((d) => recentComments.push(d.data()));
+
+        const generate = httpsCallable(functions, 'generateEnemyMentor');
+        const result = await generate({ profile: currentProfile || {}, recentThreads, recentComments });
+        const data = result.data || {};
+
+        appEl.innerHTML = `
+          <a href="#" class="back-link" onclick="window.showChaosLab(); return false;">&#8592; back to chaos lab</a>
+          <div class="dashboard-panel" style="border-top:4px solid #7c3aed;">
+            <div class="resource-meta">Enemy Mentor Mode</div>
+            <h2>${escapeHtml(data.rivalName || 'The Rival')}</h2>
+            <div class="section-subtitle">${escapeHtml(data.archetype || '')}</div>
+            <div class="comment-body" style="margin-top:14px;">${escapeHtml(data.overview || '')}</div>
+            <div class="dashboard-grid" style="margin-top:18px;">
+              <div class="profile-card"><h3>What they mock</h3><ul class="profile-list">${(data.mockery || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul></div>
+              <div class="profile-card"><h3>What they steal</h3><ul class="profile-list">${(data.steals || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul></div>
+              <div class="profile-card"><h3>Drills</h3><ul class="profile-list">${(data.drills || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul></div>
+            </div>
+            <div class="message info" style="margin-top:16px;margin-bottom:0;">${escapeHtml(data.finalWarning || '')}</div>
+          </div>
+        `;
+      } catch (error) {
+        console.error('Error opening Enemy Mentor Mode:', error);
+        appEl.innerHTML = '<div class="message error">Your rival declined to appear.</div>';
+      }
+    }
+
+    async function showDoomsdaySimulator() {
+      if (!currentUser) { showLogin(); return; }
+      currentView = 'doomsdaySimulator';
+      cleanupListeners();
+      const appEl = document.getElementById('app');
+      appEl.innerHTML = '<div class="loading">Spinning up your worst plausible week...</div>';
+      try {
+        const weekKey = getSignalStormWeekKey();
+        const simId = `${currentUser.uid}_${weekKey}`;
+        const simRef = doc(db, 'chaosSimulations', simId);
+        let simSnap = await getDoc(simRef);
+        if (!simSnap.exists()) {
+          const pathIds = (currentProfile?.joinedPaths || []).slice(0, 4);
+          const growthPaths = [];
+          for (const pathId of pathIds) {
+            const pathSnap = await getDoc(doc(db, 'growthPaths', pathId));
+            if (pathSnap.exists()) growthPaths.push(pathSnap.data());
+          }
+          const generate = httpsCallable(functions, 'generateDoomsdayScenario');
+          const result = await generate({ profile: currentProfile || {}, growthPaths });
+          await setDoc(simRef, {
+            weekKey,
+            ...(result.data || {}),
+            selectedChoiceId: null,
+            selectedConsequence: '',
+            createdAt: serverTimestamp()
+          });
+          simSnap = await getDoc(simRef);
+        }
+        const sim = { id: simSnap.id, ...simSnap.data() };
+
+        appEl.innerHTML = `
+          <a href="#" class="back-link" onclick="window.showChaosLab(); return false;">&#8592; back to chaos lab</a>
+          <div class="dashboard-panel" style="border-top:4px solid #e65100;">
+            <div class="resource-meta">Doomsday Co-Founder Simulator</div>
+            <h2>${escapeHtml(sim.title || 'System Failure')}</h2>
+            <div class="comment-body" style="margin-bottom:12px;">${escapeHtml(sim.scenario || '')}</div>
+            <div class="message error" style="margin-bottom:14px;">Stakes: ${escapeHtml(sim.stakes || '')}</div>
+            <div class="profile-card" style="margin-bottom:14px;">
+              <h3>Your fictional team</h3>
+              <ul class="profile-list">${(sim.team || []).map((member) => `<li>${escapeHtml(member)}</li>`).join('')}</ul>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;">
+              ${(sim.choices || []).map((choice) => `
+                <div class="profile-card" style="border-color:${sim.selectedChoiceId === choice.id ? '#e65100' : 'var(--border)'};">
+                  <h4>${escapeHtml(choice.label || 'Choice')}</h4>
+                  <div class="resource-description">${escapeHtml(choice.consequence || '')}</div>
+                  <div class="inline-actions" style="margin-top:10px;">
+                    <button class="small-btn" onclick="window.chooseDoomsdayPath('${escapeAttr(sim.id)}','${escapeAttr(choice.id)}')">${sim.selectedChoiceId === choice.id ? 'Chosen' : 'Choose This Path'}</button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+            ${sim.selectedConsequence ? `<div class="message info" style="margin-top:16px;">${escapeHtml(sim.selectedConsequence)}</div>` : ''}
+            ${sim.aftershock ? `<div class="mini-meta" style="margin-top:10px;">Aftershock: ${escapeHtml(sim.aftershock)}</div>` : ''}
+          </div>
+        `;
+      } catch (error) {
+        console.error('Error opening Doomsday Simulator:', error);
+        appEl.innerHTML = '<div class="message error">The simulation core melted down.</div>';
+      }
+    }
+
+    async function chooseDoomsdayPath(simId, choiceId) {
+      if (!currentUser) return;
+      try {
+        const simRef = doc(db, 'chaosSimulations', simId);
+        const simSnap = await getDoc(simRef);
+        if (!simSnap.exists()) return;
+        const sim = simSnap.data();
+        const choice = (sim.choices || []).find((item) => item.id === choiceId);
+        if (!choice) return;
+        await updateDoc(simRef, {
+          selectedChoiceId: choiceId,
+          selectedConsequence: choice.consequence || '',
+          chosenAt: serverTimestamp()
+        });
+        showMessage('Catastrophic decision locked in.', 'success');
+        showDoomsdaySimulator();
+      } catch (error) {
+        console.error('Error choosing doomsday path:', error);
+        showMessage('Could not lock that crisis path', 'error');
+      }
+    }
+
+    async function showSocialWeatherLab() {
+      if (!currentUser) { showLogin(); return; }
+      currentView = 'socialWeather';
+      cleanupListeners();
+      const appEl = document.getElementById('app');
+      appEl.innerHTML = '<div class="loading">Reading the forecast...</div>';
+      try {
+        const threadsSnap = await getDocs(query(collection(db, 'threads'), orderBy('timestamp', 'desc'), fsLimit(8)));
+        const threads = []; threadsSnap.forEach((d) => threads.push(d.data()));
+        const weather = await ensureSocialWeather(threads);
+        appEl.innerHTML = `
+          <a href="#" class="back-link" onclick="window.showChaosLab(); return false;">&#8592; back to chaos lab</a>
+          ${renderSocialWeatherPanel(weather)}
+          <div class="dashboard-panel">
+            <h3>Posting prompts for this weather system</h3>
+            <ul class="profile-list">${(weather.prompts || []).map((prompt) => `<li>${escapeHtml(prompt)}</li>`).join('')}</ul>
+            <div class="inline-actions" style="margin-top:12px;">
+              <button class="small-btn" onclick="window.showNewThread()">Write Under This Weather</button>
+              <button class="small-btn secondary-btn" onclick="window.refreshSocialWeather()">Force New Forecast</button>
+            </div>
+          </div>
+        `;
+      } catch (error) {
+        console.error('Error opening Social Weather desk:', error);
+        appEl.innerHTML = '<div class="message error">The forecast tower is down.</div>';
+      }
+    }
+
+    async function refreshSocialWeather() {
+      if (!currentUser) return;
+      try {
+        const weatherId = `global_${getSignalStormWeekKey()}`;
+        await deleteDoc(doc(db, 'socialWeather', weatherId));
+        showMessage('A fresh front is moving in.', 'success');
+        if (currentView === 'socialWeather') showSocialWeatherLab();
+      } catch (error) {
+        console.error('Error refreshing social weather:', error);
+        showMessage('Could not refresh the forecast', 'error');
+      }
+    }
+
+    async function showMuseumOfAbandonedSelves() {
+      if (!currentUser) { showLogin(); return; }
+      currentView = 'museum';
+      cleanupListeners();
+      const appEl = document.getElementById('app');
+      appEl.innerHTML = '<div class="loading">Opening the museum...</div>';
+      try {
+        const snap = await getDocs(query(collection(db, 'identitySnapshots'), where('userId', '==', currentUser.uid), orderBy('createdAt', 'desc'), fsLimit(24)));
+        const snapshots = [];
+        snap.forEach((d) => snapshots.push({ id: d.id, ...d.data() }));
+
+        let html = `
+          <a href="#" class="back-link" onclick="window.showChaosLab(); return false;">&#8592; back to chaos lab</a>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:15px;">
+            <div>
+              <h2>Museum Of Abandoned Selves</h2>
+              <div class="section-subtitle" style="margin-bottom:0;">Archived versions of your ambition. Some deserve revival. Some deserve burial.</div>
+            </div>
+            <button class="small-btn" onclick="window.archiveCurrentSelf()">Archive Current Self</button>
+          </div>
+        `;
+
+        if (!snapshots.length) {
+          html += emptyState('&#127963;', 'No archived selves yet', 'Save your profile or archive your current self to begin building the museum.', 'Archive Current Self', 'window.archiveCurrentSelf()');
+        } else {
+          html += '<div class="profile-grid">';
+          snapshots.forEach((snapshot) => {
+            html += `
+              <div class="profile-detail-card" style="border-color:${snapshot.status === 'buried' ? 'rgba(204,0,0,0.35)' : 'var(--border)'};">
+                <div class="resource-meta">${escapeHtml(snapshot.reason || 'manual')} • ${snapshot.status || 'active'}</div>
+                <h4>${escapeHtml(snapshot.label || 'Unknown self')}</h4>
+                ${snapshot.headline ? `<p><strong>Headline:</strong> ${escapeHtml(snapshot.headline)}</p>` : ''}
+                ${snapshot.currentFocus ? `<p><strong>Focus:</strong> ${escapeHtml(snapshot.currentFocus)}</p>` : ''}
+                ${snapshot.growthGoal ? `<p><strong>Goal:</strong> ${escapeHtml(snapshot.growthGoal)}</p>` : ''}
+                <div class="inline-actions" style="margin-top:10px;">
+                  <button class="small-btn" onclick="window.reviveMuseumSnapshot('${snapshot.id}')">Revive</button>
+                  <button class="small-btn secondary-btn" onclick="window.fuseMuseumSnapshot('${snapshot.id}')">Fuse</button>
+                  <button class="small-btn danger-btn" onclick="window.buryMuseumSnapshot('${snapshot.id}')">Bury</button>
+                </div>
+              </div>
+            `;
+          });
+          html += '</div>';
+        }
+
+        appEl.innerHTML = html;
+      } catch (error) {
+        console.error('Error opening museum:', error);
+        appEl.innerHTML = '<div class="message error">The museum doors are stuck.</div>';
+      }
+    }
+
+    async function reviveMuseumSnapshot(snapshotId) {
+      if (!currentUser) return;
+      try {
+        const snap = await getDoc(doc(db, 'identitySnapshots', snapshotId));
+        if (!snap.exists()) return;
+        const data = snap.data();
+        await setDoc(doc(db, 'users', currentUser.uid), {
+          headline: data.headline || '',
+          bio: data.bio || '',
+          currentFocus: data.currentFocus || '',
+          growthGoal: data.growthGoal || '',
+          growthChallenge: data.growthChallenge || '',
+          growthStage: data.growthStage || '',
+          preferredSupport: data.preferredSupport || '',
+          projectsText: data.projectsText || '',
+          interests: data.interests || [],
+          expertiseAreas: data.expertiseAreas || [],
+          skills: data.skills || [],
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+        await loadProfile(currentUser.uid);
+        showMessage('Archived self revived.', 'success');
+        showProfile(currentUser.uid);
+      } catch (error) {
+        console.error('Error reviving snapshot:', error);
+        showMessage('Could not revive that self', 'error');
+      }
+    }
+
+    async function buryMuseumSnapshot(snapshotId) {
+      if (!currentUser) return;
+      try {
+        await updateDoc(doc(db, 'identitySnapshots', snapshotId), {
+          status: 'buried',
+          buriedAt: serverTimestamp()
+        });
+        showMessage('That version of you has been buried.', 'success');
+        showMuseumOfAbandonedSelves();
+      } catch (error) {
+        console.error('Error burying snapshot:', error);
+        showMessage('Could not bury that self', 'error');
+      }
+    }
+
+    async function fuseMuseumSnapshot(snapshotId) {
+      if (!currentUser || !currentProfile) return;
+      try {
+        const snap = await getDoc(doc(db, 'identitySnapshots', snapshotId));
+        if (!snap.exists()) return;
+        const snapshot = snap.data();
+        const fuse = httpsCallable(functions, 'fuseIdentitySnapshot');
+        const result = await fuse({ currentProfile, snapshot });
+        const data = result.data || {};
+        await setDoc(doc(db, 'users', currentUser.uid), {
+          headline: data.headline || currentProfile.headline || '',
+          currentFocus: data.currentFocus || currentProfile.currentFocus || '',
+          growthGoal: data.growthGoal || currentProfile.growthGoal || '',
+          museumFusionNote: data.mergedSummary || '',
+          museumEpitaph: data.epitaph || '',
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+        await updateDoc(doc(db, 'identitySnapshots', snapshotId), {
+          status: 'fused',
+          fusedAt: serverTimestamp()
+        });
+        await loadProfile(currentUser.uid);
+        showMessage('Archived self fused into the present.', 'success');
+        showProfile(currentUser.uid);
+      } catch (error) {
+        console.error('Error fusing snapshot:', error);
+        showMessage('Could not fuse that self', 'error');
+      }
+    }
+
+    async function archiveCurrentSelf() {
+      const ref = await archiveIdentitySnapshot('manual');
+      showMessage(ref ? 'Current self archived.' : 'Nothing new to archive yet.', ref ? 'success' : 'info');
+      if (currentView === 'museum') showMuseumOfAbandonedSelves();
+      if (currentView === 'chaosLab') showChaosLab();
+    }
+
     // ──────────────────────────────────────────
     // Init
     // ──────────────────────────────────────────
@@ -4131,6 +4671,7 @@
             <div class="nav-dropdown-menu">
               <a href="#" onclick="window.showAnthropology(); window.closeNavDropdowns(); return false;">Insights</a>
               <a href="#" onclick="window.showMoodAnalyzer(); window.closeNavDropdowns(); return false;">Mood Analyzer</a>
+              <a href="#" onclick="window.showChaosLab(); window.closeNavDropdowns(); return false;">Chaos Lab</a>
               <a href="#" onclick="window.showCoThinkList(); window.closeNavDropdowns(); return false;">Co-Think</a>
               <a href="#" onclick="window.showInvite(); window.closeNavDropdowns(); return false;">Invite</a>
             </div>
@@ -4167,6 +4708,7 @@
             <button class="nav-dropdown-btn section-meta" onclick="window.toggleNavDropdown('navMeta')">Meta <span class="dd-arrow">&#9662;</span></button>
             <div class="nav-dropdown-menu">
               <a href="#" onclick="window.showAnthropology(); window.closeNavDropdowns(); return false;">Insights</a>
+              <a href="#" onclick="window.showChaosLab(); window.closeNavDropdowns(); return false;">Chaos Lab</a>
             </div>
           </div>
         `;
@@ -4481,6 +5023,19 @@
             </div>
           </div>
           <div id="signalStormPanel"></div>
+          <div id="socialWeatherHomePanel"></div>
+          <div class="dashboard-panel" style="margin-bottom:18px;border-top:4px solid #7c3aed;background:
+            radial-gradient(circle at top right, rgba(124,58,237,0.18), transparent 35%),
+            linear-gradient(135deg, rgba(124,58,237,0.08), rgba(255,255,255,0.02));">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+              <div>
+                <div class="resource-meta">Off the wall</div>
+                <h3 style="margin:6px 0 8px;">Chaos Lab</h3>
+                <div class="section-subtitle" style="margin-bottom:0;">Reputation hauntings, enemy mentors, social weather systems, and other inadvisable experiments.</div>
+              </div>
+              <button class="small-btn" onclick="window.showChaosLab()">Enter Chaos Lab</button>
+            </div>
+          </div>
           ${renderPersonalizedNextStepsPanel(meProfile, suggestedCommunities)}
           <div class="dashboard-grid">
             <div>
@@ -4605,6 +5160,7 @@
         });
 
         loadSignalStormPanel(meProfile);
+        loadSocialWeatherHomePanel(threads);
 
         // Load internet mood
         loadInternetMood();
@@ -4940,6 +5496,7 @@
         <div class="new-thread-form">
           <h2>Share A Signal</h2>
           <p style="font-size:12px;color:var(--gray);margin-bottom:18px;">Ask a smart question, share what you are building, or post a blocker so the right people can help.</p>
+          <div id="threadWeatherPanel"></div>
           <form onsubmit="window.submitThread(event); return false;">
             <div class="form-group">
               <label for="threadTitle">Title</label>
@@ -4982,6 +5539,7 @@
           </form>
         </div>
       `;
+      loadThreadWeatherPanel();
     }
 
     async function showEditThread(threadId) {
@@ -6670,6 +7228,7 @@
         }, { merge: true });
 
         await loadProfile(currentUser.uid);
+        await archiveIdentitySnapshot('profile-save');
         await checkOnboardingNeeded();
         showProfile(currentUser.uid);
         showMessage('Profile updated!', 'success');
@@ -11108,6 +11667,18 @@
     window.showMoodAnalyzer = showMoodAnalyzer;
     window.switchMoodTab = switchMoodTab;
     window.runMoodAnalysis = runMoodAnalysis;
+    window.showChaosLab = showChaosLab;
+    window.showReputationHaunting = showReputationHaunting;
+    window.showEnemyMentorMode = showEnemyMentorMode;
+    window.showDoomsdaySimulator = showDoomsdaySimulator;
+    window.chooseDoomsdayPath = chooseDoomsdayPath;
+    window.showSocialWeatherLab = showSocialWeatherLab;
+    window.refreshSocialWeather = refreshSocialWeather;
+    window.showMuseumOfAbandonedSelves = showMuseumOfAbandonedSelves;
+    window.reviveMuseumSnapshot = reviveMuseumSnapshot;
+    window.buryMuseumSnapshot = buryMuseumSnapshot;
+    window.fuseMuseumSnapshot = fuseMuseumSnapshot;
+    window.archiveCurrentSelf = archiveCurrentSelf;
     window.chooseSignalStormAction = chooseSignalStormAction;
     window.regenerateSignalStorm = regenerateSignalStorm;
     window.showThoughtLab = showThoughtLab;
@@ -11664,6 +12235,7 @@
           onboardingSignalsSet: true
         };
 
+        await archiveIdentitySnapshot('growth-direction');
         await trackJourneyEvent('growth_direction_set', { growthStage, preferredSupport });
         await checkOnboardingNeeded();
         showMessage('Your growth direction is set.', 'success');
