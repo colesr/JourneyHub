@@ -155,7 +155,7 @@ app.post('/api/db', handleDb);
 // AI inference via Cloudflare Workers AI. Uses Llama 3.1 8B Instruct by default;
 // callers can override the model per request. Auth required — AI calls cost
 // Neurons from our free-tier budget, so anonymous access is closed.
-const DEFAULT_AI_MODEL = '@cf/meta/llama-3.1-8b-instruct';
+const DEFAULT_AI_MODEL = '@cf/meta/llama-3.1-8b-instruct-fast';
 
 app.post('/api/ai', async (c) => {
   const user = c.get('user');

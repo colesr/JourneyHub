@@ -5,7 +5,7 @@
 
 export const FUTURE_SELF_BOT_ID = '__journeyhub_future_self__';
 const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
-const MODEL = '@cf/meta/llama-3.1-8b-instruct';
+const MODEL = '@cf/meta/llama-3.1-8b-instruct-fast';
 
 const AUTO_ID_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 function autoId() {
